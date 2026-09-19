@@ -1,0 +1,1164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Buildermont</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#212622" />
+<meta name="color-scheme" content="dark" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Buildermont" />
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+<style>
+  /* ---- design tokens (docs/looks/DESIGN.md §2). The colour values repeat `cssTokens()` in
+     src/shared/palette.ts, so the first paint needs no script; tests/palette.test.ts holds the two together.
+     Nothing below this block may spell a colour: a rule names a token, or mixes one with color-mix(). */
+  :root {
+    --bg: #0e120f;
+    --well: #161b17;
+    --panel: #212622;
+    --raised: #2d332e;
+    --hover: #394039;
+    --pressed: #272c28;
+    --divider: #3a413b;
+    --edge: #4d564f;
+    --edge-strong: #818a84;
+    --text: #f1ecdf;
+    --muted: #bdc0b6;
+    --disabled: #7d827b;
+    --on-light: #1b1e1a;
+    --on-danger: #ffffff;
+    --scrim: rgba(14,18,15,0.62);
+    --shadow: rgba(16,24,12,0.38);
+    --sel: #f6f1e3;
+    --money: #fbd452;
+    --money-on-light: #7a4f00;
+    --port-in: #6ab7fe;
+    --port-out: #fbd452;
+    --research: #3ccfc0;
+    --ok: #81f0a3;
+    --warn: #ff9b52;
+    --danger: #f05848;
+    --danger-text: #ff8a7a;
+    --danger-fill: #c9382f;
+
+    /* One HUD pixel. ui.ts sets 1rem = 13px × UI scale on <html>, so this is exactly 1px at scale 1 and every
+       length written as N × --px lands on a whole pixel there: no 4.03px gaps, no 1px rules smeared over two. */
+    --px: calc(1rem / 13);
+    --s1: calc(4 * var(--px));
+    --s2: calc(8 * var(--px));
+    --s3: calc(12 * var(--px));
+    --s4: calc(16 * var(--px));
+    /* Three radii and no others: badges / controls / panels. They do not scale: a radius is a material. */
+    --r-sm: 4px;
+    --r-md: 6px;
+    --r-lg: 10px;
+    /* Four sizes (12/14/16/20) on 16/20/20/24 lines. K2: text never drops below 12px whatever the UI scale
+       (BH-046), and a line never drops below its text. Weights are 400, 600 and 700 only: Segoe has no 500. */
+    --fs-sm: max(12px, calc(12 * var(--px)));
+    --fs-body: max(12px, calc(14 * var(--px)));
+    --fs-md: max(13px, calc(16 * var(--px)));
+    --fs-title: max(16px, calc(20 * var(--px)));
+    --lh-sm: max(16px, calc(16 * var(--px)));
+    --lh-body: max(16px, calc(20 * var(--px)));
+    --lh-title: max(20px, calc(24 * var(--px)));
+    /* Panels cast the world's shadow: hard, to the north-east, never blurred. */
+    --cast: 3px -3px 0 var(--shadow);
+    --cast-dialog: 6px -6px 0 var(--shadow);
+    /* Every control is this tall; the top bar and the bottom slot are built around it. */
+    --ctl: calc(36 * var(--px));
+    --slot-w: calc(56 * var(--px));
+    --slot-h: calc(60 * var(--px));
+    --bar-h: calc(76 * var(--px));
+    --top-h: calc(52 * var(--px));
+    --bottom-h: calc(76 * var(--px));
+    /* Box the renderer's minimap occupies above the bottom bar's right end (render.ts MINIMAP + frame).
+       The side panel stops above it so it can never cover the map's navigation control (BH-014). */
+    --minimap-h: 160px;
+    --minimap-w: 160px;
+    font-family: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+    /* Every number in this game changes in place. */
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1, "case" 1;
+    /* Light text on a dark panel: without it macOS fattens the cream. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html { font-size: 13px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; font-size: var(--fs-body); line-height: var(--lh-body); font-weight: 400; }
+  body.reduced-motion *, body.reduced-motion *::before, body.reduced-motion *::after { transition: none !important; animation-duration: 0.01ms !important; }
+  /* The ground is a WebGL layer of its own under the map's 2D canvas, in the same box (docs/looks/GROUND-GL.md §2).
+     It takes no input: every pointer event belongs to #game above it. */
+  #ground { position: absolute; inset: 0; display: block; pointer-events: none; }
+  #game { position: absolute; inset: 0; display: block; cursor: crosshair; }
+  [hidden] { display: none !important; }
+
+  /* ---- controls. Flat enamel: a fill and a 1px edge. No top light and no bottom lip (the sun is in the
+     south-west; thickness comes from the panels' cast shadow). Hover changes the fill and nothing else, a press
+     darkens it and drops the control 1px, and none of it is animated. */
+  button { font: inherit; font-weight: 600; color: var(--text); background: var(--raised); border: 1px solid var(--edge); border-radius: var(--r-md); min-height: var(--ctl); padding: 0 var(--s3); cursor: pointer; display: inline-flex; align-items: center; gap: var(--s2); justify-content: center; line-height: var(--lh-body); }
+  @media (hover: hover) { button:hover:not(:disabled) { background: var(--hover); } }
+  button:active:not(:disabled) { background: var(--pressed); transform: translateY(1px); }
+  /* "This one": the tool in hand, the chosen recipe, the running speed. Selection is light, not a hue. */
+  button.active, button.active:hover:not(:disabled), button.active:active:not(:disabled) { background: var(--sel); color: var(--on-light); border-color: var(--sel); }
+  /* Primary is cream too. Gold is kept for the buttons that spend money: the ones that carry a price. */
+  button.primary { background: var(--sel); color: var(--on-light); border-color: var(--sel); font-weight: 700; }
+  button.primary:has(.cost) { background: var(--money); border-color: var(--money); }
+  @media (hover: hover) {
+    button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--sel) 88%, var(--on-light)); border-color: transparent; }
+    button.primary:has(.cost):hover:not(:disabled) { background: color-mix(in srgb, var(--money) 88%, var(--on-light)); }
+  }
+  button.primary:active:not(:disabled) { background: color-mix(in srgb, var(--sel) 80%, var(--on-light)); border-color: transparent; }
+  button.primary:has(.cost):active:not(:disabled) { background: color-mix(in srgb, var(--money) 80%, var(--on-light)); }
+  button:disabled, button.primary:disabled, button.primary:has(.cost):disabled { background: var(--pressed); border-color: var(--divider); color: var(--disabled); cursor: not-allowed; }
+  button:disabled img.ic { opacity: 0.5; }
+  /* Destructive: quiet at rest (a calm bar shows no alert), red only once it is the mode in hand. */
+  button.danger { color: var(--danger-text); }
+  button.danger.active, button.danger.active:hover:not(:disabled), button.danger.active:active:not(:disabled) { background: var(--danger-fill); border-color: var(--danger-fill); color: var(--on-danger); }
+  button.icon { background: none; border-color: transparent; width: var(--ctl); padding: 0; color: var(--muted); font-size: var(--fs-md); }
+  @media (hover: hover) { button.icon:hover:not(:disabled) { color: var(--text); background: var(--hover); } }
+  button kbd { margin-left: var(--s1); }
+  /* A key plate: recessed, 12/16 700. The same object wherever a key is named. */
+  kbd { display: inline-block; min-width: calc(16 * var(--px)); text-align: center; background: var(--well); border: 1px solid var(--edge); border-radius: var(--r-sm); padding: 0 var(--s1); font-family: inherit; font-size: var(--fs-sm); line-height: calc(var(--lh-sm) - 2px); font-weight: 700; color: var(--muted); }
+  button.active kbd, button.primary kbd { background: var(--on-light); border-color: var(--on-light); color: var(--sel); }
+  select, input[type=text], input[type=search], input:not([type]), textarea { font: inherit; color: var(--text); background: var(--well); border: 1px solid var(--edge-strong); border-radius: var(--r-md); min-height: var(--ctl); padding: 0 var(--s2); min-width: 0; }
+  textarea { padding: var(--s1) var(--s2); }
+  ::placeholder { color: var(--disabled); opacity: 1; }
+  /* Off is a recessed box, on is a cream one with a drawn tick: the brightest pixels mean "on". */
+  input[type=checkbox] { appearance: none; -webkit-appearance: none; flex: none; width: calc(20 * var(--px)); height: calc(20 * var(--px)); margin: 0; background: var(--well); border: 1px solid var(--edge-strong); border-radius: var(--r-sm); display: inline-grid; place-items: center; cursor: pointer; }
+  input[type=checkbox]:checked { background: var(--sel); border-color: var(--sel); }
+  input[type=checkbox]:checked::before { content: ""; width: calc(14 * var(--px)); height: calc(14 * var(--px)); background: var(--on-light); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M2.5 7.5l3 3 6-7' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M2.5 7.5l3 3 6-7' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+  input[type=range] { accent-color: var(--sel); flex: 1; }
+  /* Keyboard focus is a cream ring with a gap; on things packed in rows (slots, chips, list rows, inputs) it
+     is drawn inside, so it neither bloats the box nor lands on a neighbour. Blue keeps one meaning: input. */
+  :focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: -2px; }
+  button.active:focus-visible, button.primary:focus-visible { outline-color: var(--sel); box-shadow: 0 0 0 2px var(--panel); }
+  a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+  code { background: var(--well); padding: 0 var(--s1); border-radius: var(--r-sm); font-size: var(--fs-sm); }
+  h1, h2, h3, h4 { margin: 0; font-weight: 700; }
+  b, strong { font-weight: 700; }
+  .hint { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); }
+  .warn { color: var(--warn); font-size: var(--fs-sm); line-height: var(--lh-sm); }
+  .red { color: var(--danger-text); }
+  .gold { color: var(--money); }
+  /* Earth tokens: the trophy count is not money and not research, so it is plain light. */
+  .cyan { color: var(--text); }
+  /* Locked is not a warning. */
+  .lock { color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); }
+  .tag { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; background: var(--well); border: 1px solid var(--divider); border-radius: var(--r-sm); padding: 0 var(--s1); color: var(--muted); }
+  img.ic { vertical-align: middle; image-rendering: auto; flex: none; }
+  /* One material: opaque rubber, a 1px line that holds 3:1 on its own, the world's hard north-east shadow.
+     No alpha (the bar must be one colour over grass, sand and water) and no blur (docs/PERF.md §10). */
+  .panel { position: absolute; background: var(--panel); border: 1px solid var(--edge-strong); border-radius: var(--r-lg); box-shadow: var(--cast); }
+  /* The one section-caps rule: tier rails, "COSTS", "UNLOCKS", panel sections, strip labels. */
+  #side h4, .dialog .sh, .ttd h4, .ttt { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: var(--s1) var(--s3); align-items: center; }
+  .kv .l { color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); }
+  .kv.big { font-size: var(--fs-md); font-weight: 700; }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--s1); }
+  /* A chip is information, so it is flat and recessed; what can be pressed is raised (.rbtn, .ttl). */
+  .item { display: inline-flex; align-items: center; gap: var(--s1); padding: calc(2 * var(--px)) var(--s2) calc(2 * var(--px)) var(--s1); background: var(--pressed); border: 1px solid var(--divider); border-radius: var(--r-md); font-size: var(--fs-sm); line-height: var(--lh-sm); }
+  .item b { font-weight: 700; }
+  .item .prog { color: var(--research); font-weight: 700; }
+  .bar { height: var(--s1); background: var(--well); border-radius: var(--r-sm); overflow: hidden; margin: var(--s1) 0; }
+  .bar > div { height: 100%; background: var(--ok); transition: width 150ms linear; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1); margin: var(--s1) 0; }
+  .flow .arrow { color: var(--muted); padding: 0 calc(2 * var(--px)); }
+  .pips { display: inline-flex; gap: calc(2 * var(--px)); vertical-align: middle; margin-right: var(--s1); }
+  .pips i { width: var(--s2); height: var(--s2); border-radius: var(--r-sm); background: var(--well); border: 1px solid var(--edge); }
+  .pips i.on { background: var(--sel); border-color: var(--sel); }
+
+  /* ---- top bar (F3, RV-030): 52 tall, 8 inside, every control 36. */
+  /* The cast falls north-east, and north of this bar is the 8px screen gutter: there the shadow read as a second,
+     misregistered edge. The top bar keeps the east half only. */
+  #topbar { box-shadow: 3px 0 0 var(--shadow); }
+  #topbar { top: var(--s2); left: var(--s2); right: var(--s2); height: var(--top-h); display: flex; align-items: center; gap: var(--s3); padding: 0 var(--s2); z-index: 3; }
+  #topbar .stat { display: flex; align-items: center; gap: var(--s1); font-weight: 700; font-size: var(--fs-md); line-height: var(--lh-body); white-space: nowrap; }
+  /* The balance (coin and number) has a reserved width and is set to the right of it, so "9.89M +9/min" and
+     "10M +0/min" put the income in the same place, the digits sit against the income, and the coin stays
+     against its number. Whatever slack there is lies left of the coin, where it is the bar's own margin. */
+  #topbar .stat .bal { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--s1); min-width: calc(5ch + 26 * var(--px)); }
+  #topbar .stat .v { color: var(--money); }
+  #topbar .stat.tokens .v { color: var(--text); }
+  /* RV-053: the speed readout. ui.ts inserts it only while the speed is not 1×, so an ordinary game
+     never carries it. A flat recessed tag, because the two things next to it that are raised are buttons,
+     and this one is state you cannot press. */
+  #topbar .stat.speed { background: var(--well); border-radius: var(--r-sm); min-width: calc(24 * var(--px)); height: calc(20 * var(--px)); padding: 0 var(--s1); justify-content: center; font-size: var(--fs-sm); line-height: var(--lh-sm); }
+  #topbar .stat.speed .v { color: var(--text); min-width: 0; text-align: center; }
+  #topbar .stat.speed .v .g { color: var(--muted); }
+  /* Income is the score: green while it is coming in, recessed grey at zero (ui.ts sets .pos / .zero / .neg). */
+  #topbar .stat .sub { color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; margin-left: var(--s1); }
+  #topbar .stat .sub.pos { color: var(--ok); }
+  #topbar .stat .sub.zero { color: var(--disabled); }
+  #topbar .stat .sub.neg { color: var(--danger-text); }
+  #topbar-spacer { flex: 1; }
+  #topbar #btn-menu, #topbar #btn-more { flex: none; width: var(--ctl); height: var(--ctl); padding: 0; font-size: var(--fs-md); line-height: 1; }
+  /* The research control is a button like its two neighbours (36, r 6, raised) with the nearest tech's
+     completion as a 3px bar along its bottom edge, inside the radius: no name, no percent. The tooltip
+     carries the tech and its remaining items. It used to be a ring, the one round thing in a HUD of 4/6/10. */
+  #research-bar { position: relative; flex: none; width: var(--ctl); height: var(--ctl); min-height: 0; padding: 0; overflow: hidden; }
+  #research-bar .ri { display: flex; line-height: 1; color: var(--muted); }
+  /* Teal once the lab has banked something towards a technology: research is the lab's colour. */
+  #research-bar.run .ri { color: var(--research); }
+  #research-bar.active .ri { color: var(--on-light); }
+  #research-bar .rp { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--well); }
+  #research-bar .rp i { display: block; height: 100%; width: 0; background: var(--research); }
+  #research-bar.done .rp i { background: var(--ok); }
+  #research-bar.active .rp { background: color-mix(in srgb, var(--sel) 70%, var(--on-light)); }
+  /* BH-050: the save indicator never resizes the bar. It is a 6px dot in a slot the gold group
+     always reserves; a save lights it for 2.5s (RV-030 — it used to be a pill with a word). */
+  #saved-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); opacity: 0; align-self: center; margin-left: var(--s1); }
+  #saved-dot.show { animation: savedot 2.5s forwards; }
+  @keyframes savedot { 0% { opacity: 0; } 10% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+  /* Touch-only, shown by body.touch below (docs/MOBILE.md §4.6). */
+  #undo { display: none; }
+  /* Paused: the map goes quiet and says so once, under the HUD and over the canvas (RV-030 / K4). The word
+     sits on a plate like every other word over the terrain. */
+  #paused { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg) 40%, transparent); pointer-events: none; }
+  #paused span { font-size: var(--fs-md); line-height: var(--lh-body); font-weight: 700; letter-spacing: 0.24em; text-indent: 0.24em; text-transform: uppercase; color: var(--text); background: var(--panel); border: 1px solid var(--edge-strong); border-radius: var(--r-md); box-shadow: var(--cast); padding: var(--s2) var(--s4); }
+  /* The HUD scales with --uiScale, so a px media query fires at the wrong moment: at scale 1.4 a
+     1280px window has only 70rem of room, at scale 0.8 it has 123rem. ui.ts measures the viewport
+     in rem and sets these classes instead, so every step is scale-aware (BH-050). */
+  body.hud-tight #topbar { gap: var(--s2); }
+  body.hud-cramped #topbar { gap: var(--s1); padding: 0 var(--s1); }
+
+  /* ---- objectives (B1) */
+  #objectives { top: calc(var(--s2) + var(--top-h) + var(--s2)); left: var(--s2); width: calc(300 * var(--px)); max-width: calc(100vw - 2 * var(--s2)); padding: var(--s2) var(--s3); z-index: 2; }
+  #objectives .oh { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s1); }
+  #objectives .ot { font-weight: 700; font-size: var(--fs-md); flex: 1; }
+  #objectives .op { color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; }
+  #objectives .ostep { display: flex; gap: var(--s2); align-items: flex-start; padding: var(--s1) 0; }
+  #objectives .ostep.small { color: var(--muted); padding: calc(2 * var(--px)) 0; }
+  #objectives .ostep.small .on { font-size: var(--fs-sm); line-height: calc(20 * var(--px)); font-weight: 600; }
+  #objectives .check { flex: none; width: calc(20 * var(--px)); height: calc(20 * var(--px)); border-radius: var(--r-sm); border: 1px solid var(--edge); display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-sm); line-height: 1; font-weight: 700; color: var(--muted); background: var(--well); }
+  #objectives .current .check { border-color: var(--sel); color: var(--sel); }
+  #objectives .done .check { background: var(--ok); border-color: var(--ok); color: var(--on-light); }
+  #objectives .on { font-weight: 600; }
+  #objectives .ohint { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); margin-top: calc(2 * var(--px)); }
+  #objectives .oa { display: flex; justify-content: flex-end; margin-top: var(--s1); }
+
+  /* ---- side panel */
+  /* BH-014: the panel used to run down to the toolbar, straight over the minimap in the
+     bottom-right corner. It now stops above the minimap box; the panel scrolls, the minimap does
+     not, so the panel is the one that gives way. */
+  #side { top: calc(var(--s2) + var(--top-h) + var(--s2)); right: var(--s2); width: calc(360 * var(--px)); max-width: calc(100vw - 2 * var(--s2)); bottom: calc(var(--bottom-h) + var(--s2) + var(--s2) + var(--minimap-h)); min-height: calc(180 * var(--px)); overflow: auto; padding: var(--s3) var(--s3) 0; z-index: 2; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  /* The foot: 12px of the panel's own rubber pinned to the bottom edge, with a rule over it while there is
+     more below (ui.ts sets .over). Text that scrolls out ends under a straight rule, as it does under the
+     header, instead of being sliced by the rounded corner. */
+  #side::after { content: ""; display: block; position: sticky; bottom: 0; height: var(--s3); margin: 0 calc(-1 * var(--s3)); background: var(--panel); z-index: 1; }
+  #side.over::after { box-shadow: inset 0 1px 0 var(--divider); }
+  /* The header is the panel's own material from edge to edge (it used to be a darker band that stopped
+     short of the right side), with a rule under it for what scrolls beneath. */
+  #side .ph { display: flex; align-items: center; gap: var(--s2); position: sticky; top: calc(-1 * var(--s3)); margin: calc(-1 * var(--s3)) calc(-1 * var(--s3)) var(--s2); padding: var(--s2) var(--s2) var(--s2) var(--s3); background: var(--panel); border-bottom: 1px solid var(--divider); z-index: 1; }
+  #side .ph h3 { font-size: var(--fs-md); line-height: var(--lh-body); display: flex; align-items: center; gap: var(--s2); }
+  #side .ph .hint { flex: 1; }
+  #side .ph .close { margin-left: auto; }
+  #side h4 { margin: var(--s3) 0 var(--s1); display: flex; align-items: center; gap: var(--s2); }
+  #side h4 .item { text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--text); }
+  #side .desc { margin: var(--s2) 0 0; }
+  #side .actions { display: flex; gap: var(--s1); flex-wrap: wrap; margin-top: var(--s3); align-items: center; }
+  #side .actions.col { flex-direction: column; align-items: stretch; }
+  #side .actions.col button { justify-content: flex-start; }
+  #side .status { font-weight: 600; margin: var(--s2) 0 0; }
+  #side .status.ok { color: var(--ok); }
+  #side .status.bad { color: var(--danger-text); }
+  /* BH-027: `1fr 1fr` columns have an auto (min-content) floor, so the two-column recipe grid
+     pushed its rate column past the panel edge and ellipsised names to "Electromagne". auto-fill
+     drops to one column when two do not fit, and the name gets the full width. */
+  #side .rgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(164 * var(--px)), 1fr)); gap: var(--s1); }
+  #side .rcard, #recipes .rbtn { display: flex; align-items: center; gap: var(--s2); text-align: left; padding: 0 var(--s2); }
+  #side .rcard .rn, #recipes .rbtn .rn { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #side .rcard .rr, #recipes .rbtn .rr, #command .crow .rbtn .rr { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 400; color: var(--muted); }
+  #side .rcard.active .rr, #recipes .rbtn.active .rr, #command .crow .rbtn.active .rr { color: var(--on-light); }
+  #side .frow { display: flex; gap: var(--s1); align-items: center; }
+  #side .frow select { flex: 1; }
+  #side details summary { cursor: pointer; margin: var(--s1) 0; font-weight: 600; }
+  #side table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); line-height: var(--lh-sm); }
+  #side th { text-align: left; color: var(--muted); font-weight: 600; padding: var(--s1); }
+  #side td { padding: var(--s1); border-bottom: 1px solid var(--divider); }
+  #side td.n, #side th.n { text-align: right; }
+  #side tr[data-item] { cursor: pointer; }
+  @media (hover: hover) { #side tr[data-item]:hover { background: var(--hover); } }
+  /* A picked row is ringed, not filled: cream fill is for a control in hand, and a 334px cream slab was the
+     brightest thing on screen for a passive state. The ring is drawn on the cells (a <tr> takes no shadow
+     in every engine): top and bottom on each, the ends on the first and last. */
+  #side tr.sel, #side tr.sel:hover { background: var(--raised); }
+  #side tr.sel td { box-shadow: inset 0 2px 0 var(--sel), inset 0 -2px 0 var(--sel); border-bottom-color: transparent; }
+  #side tr.sel td:first-child { box-shadow: inset 0 2px 0 var(--sel), inset 0 -2px 0 var(--sel), inset 2px 0 0 var(--sel); border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  #side tr.sel td:last-child { box-shadow: inset 0 2px 0 var(--sel), inset 0 -2px 0 var(--sel), inset -2px 0 0 var(--sel); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+  #side .tabs { display: flex; gap: var(--s1); margin: var(--s3) 0 var(--s2); }
+  #side .graph { border: 1px solid var(--divider); border-radius: var(--r-md); padding: var(--s1); background: var(--well); }
+  #side .graph svg { width: 100%; height: calc(84 * var(--px)); display: block; }
+  #side .graph .line { fill: none; stroke: var(--sel); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  #side .graph .area { fill: color-mix(in srgb, var(--sel) 12%, transparent); }
+  #side .graph .axis { stroke: var(--edge); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  #side .graph .axis.dim { stroke-dasharray: 3 4; }
+  #side .graph .dot { fill: var(--sel); }
+  #side .glabels { display: flex; justify-content: space-between; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); padding: var(--s1) var(--s1) 0; }
+  #side #ency-q { width: 100%; margin-bottom: var(--s2); }
+  /* An encyclopedia row: 36 tall, a 24px icon box, the name, the price right-aligned in its own column so
+     1, 4 and 10 share an edge, and the chevron in a 16px box. */
+  #side .eitem { border-bottom: 1px solid var(--divider); }
+  #side .erow { width: 100%; min-height: var(--ctl); background: none; border: none; border-radius: var(--r-sm); justify-content: flex-start; gap: var(--s2); padding: 0 var(--s1); outline-offset: -2px; }
+  @media (hover: hover) { #side .erow:hover:not(:disabled) { background: var(--hover); } }
+  #side .erow img.ic { width: calc(24 * var(--px)); height: calc(24 * var(--px)); }
+  #side .erow .en { flex: 1; text-align: left; font-weight: 600; }
+  #side .erow .eprice { flex: none; min-width: calc(48 * var(--px)); text-align: right; color: var(--money); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; white-space: nowrap; }
+  #side .erow .chev { flex: none; width: calc(16 * var(--px)); text-align: center; color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); }
+  #side .ebody { padding: 0 var(--s1) var(--s2); }
+  #side .rline { display: flex; flex-direction: column; gap: calc(2 * var(--px)); padding: var(--s1) 0; border-top: 1px solid var(--divider); font-size: var(--fs-sm); line-height: var(--lh-sm); }
+  #side .rline .rb { font-weight: 600; display: flex; align-items: center; gap: var(--s1); }
+  #side .rline.locked { color: var(--muted); }
+  #side .rline.locked img.ic { opacity: 0.7; }
+  #side .rline .flow { margin: 0; }
+  /* ---- blueprint library (T-0003): a name field over a list of saved blueprints, each row a paste
+     button with its actions under it, and an import field at the foot. */
+  #side .bpsave { display: flex; gap: var(--s1); align-items: center; }
+  #side .bpsave input { flex: 1; min-width: 0; }
+  #side .bplist { display: flex; flex-direction: column; margin-top: var(--s2); }
+  #side .bpitem { border-top: 1px solid var(--divider); padding: var(--s1) 0; }
+  #side button.bprow { width: 100%; background: none; border: none; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: flex-start; gap: var(--s2); padding: 0 var(--s1); text-align: left; outline-offset: -2px; }
+  @media (hover: hover) { #side button.bprow:hover:not(:disabled) { background: var(--hover); } }
+  #side .bprow .bn { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #side div.bprow { display: flex; gap: var(--s1); align-items: center; padding: var(--s1); }
+  #side div.bprow input { flex: 1; min-width: 0; }
+  #side .bpact { display: flex; gap: var(--s1); padding: 0 var(--s1); }
+  #side .bpact button { font-size: var(--fs-sm); min-height: calc(28 * var(--px)); padding: 0 var(--s2); }
+  #side .bptext { width: 100%; margin-top: var(--s1); font-family: ui-monospace, monospace; font-size: var(--fs-sm); line-height: var(--lh-sm); resize: vertical; word-break: break-all; }
+  #side .events { display: flex; flex-direction: column; }
+  #side .ev { display: grid; grid-template-columns: calc(20 * var(--px)) 1fr auto; gap: var(--s2); padding: var(--s1) 0; border-bottom: 1px solid var(--divider); font-size: var(--fs-sm); line-height: var(--lh-sm); align-items: baseline; }
+  #side .ev .et { color: var(--muted); }
+  #side .ev.error .em { color: var(--danger-text); }
+  #side .ev.research_complete .em, #side .ev.victory .em, #side .ev.earth_token .em { color: var(--ok); }
+  #side .opts { display: flex; flex-direction: column; gap: var(--s1); }
+  /* The box is 20 and the label's first line is 20, so the two share a centre line. */
+  #side .opt { display: flex; gap: var(--s2); align-items: flex-start; cursor: pointer; padding: var(--s1) 0; }
+  #side .opt > span { display: flex; flex-direction: column; flex: 1; }
+  #side .opt .on { font-weight: 600; }
+  .range { display: flex; align-items: center; gap: var(--s2); flex: 1; }
+  .range output { min-width: calc(40 * var(--px)); text-align: right; color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; }
+
+  /* ---- bottom: the toolbar, the recipe strip over it, and the command card that takes the toolbar's place.
+     All three are the same width at all times: the minimap sits above the bar, not beside it, so nothing
+     is reserved for it and selecting a building never moves the bar's right edge (L8). */
+  #bottom { position: absolute; left: var(--s2); right: var(--s2); bottom: var(--s2); display: flex; flex-direction: column; gap: var(--s2); z-index: 3; }
+  /* The toolbar and the command card share one slot, so they share one height: 8 + a 60px row + 8. */
+  #toolbar, #command { min-height: var(--bar-h); }
+
+  /* ---- the command card. The selection's controls take the toolbar's slot (same box, same height, no
+     animation): identity on the left, what it does / how it is doing in the middle, the actions on the
+     right. Chip rows scroll sideways rather than wrap, so the height never changes. */
+  #command { position: relative; display: flex; align-items: stretch; gap: var(--s3); padding: calc(var(--s2) - 1px) var(--s2); overflow: hidden; }
+  /* The identity block: the portrait seated in a well, the name beside it and the lamp and tier under the
+     name, left-aligned in a column of fixed width, so a new selection moves nothing. */
+  #command .cid { display: flex; flex-direction: row; align-items: center; gap: var(--s2); flex: none; width: calc(224 * var(--px)); min-width: 0; text-align: left; }
+  #command .cid img.ic, #command .cid .glyph { width: calc(40 * var(--px)); height: calc(40 * var(--px)); padding: var(--s1); background: var(--well); border-radius: var(--r-md); flex: none; }
+  #command .cid .glyph { font-size: calc(20 * var(--px)); line-height: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  #command .ctext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0; }
+  #command .cn { font-weight: 700; font-size: var(--fs-md); line-height: var(--lh-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #command .cs { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* The lamp on the card is the lamp on the map: lit while the machine works, dark when it does not,
+     with the reason beside it (RV-032). It sits in the identity block's sub-line, which clips rather
+     than grows, so a long reason can never widen the card. */
+  #command .cstate { font-weight: 600; }
+  #command .cstate .ok { color: var(--ok); }
+  #command .cstate .off { color: var(--muted); }
+  #command .cs .pips { margin: 0 var(--s1) 0 0; vertical-align: calc(-1 * var(--px)); }
+  #command .cmid { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: var(--s1); border-left: 1px solid var(--divider); padding-left: var(--s3); }
+  #command .crow { display: flex; align-items: center; gap: var(--s1); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; white-space: nowrap; min-height: calc(28 * var(--px)); }
+  #command .crow::-webkit-scrollbar { display: none; }
+  #command .crow .rl { color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; margin: 0 var(--s1) 0 var(--s2); flex: none; }
+  #command .crow .rl:first-child { margin-left: 0; }
+  #command .crow .item, #command .crow .rbtn, #command .crow .hint, #command .crow .warn, #command .crow .lock, #command .crow > span { flex: none; }
+  /* RV-032: the recipe row reads left to right — ingredients → the picker → the product. `.cq` is a
+     chip with no name on it (icon and a number); the name is in its title. `.none` clears the recipe. */
+  #command .crow .rbtn, #recipes .rbtn { min-height: calc(28 * var(--px)); outline-offset: -2px; }
+  #command .crow .rbtn { display: flex; align-items: center; gap: var(--s2); text-align: left; padding: 0 var(--s2); }
+  #command .crow .rbtn .rn { font-weight: 600; }
+  #command .crow .rbtn.none { width: calc(28 * var(--px)); padding: 0; color: var(--muted); }
+  #command .crow .rbtn.none.active { color: var(--on-light); }
+  #command .crow .arrow { color: var(--muted); flex: none; padding: 0 calc(2 * var(--px)); }
+  #command .crow .item.cq { gap: var(--s1); }
+  /* Only a full *output* is trouble (it blocks); a full input buffer is a healthy machine (ui.ts bufChip). */
+  #command .crow .item.cq.full b { color: var(--warn); }
+  #command .crow .bar { display: inline-block; width: calc(80 * var(--px)); height: var(--s1); margin: 0 var(--s1) 0 0; flex: none; }
+  #command .crow .bar > span { display: block; height: 100%; background: var(--ok); transition: width 150ms linear; }
+  #command .crow select { min-height: calc(28 * var(--px)); padding: 0 var(--s1); max-width: calc(156 * var(--px)); }
+  /* A row with more past its right edge ends on a solid stop with a chevron (ui.ts adds .scrolls only when it
+     overflows). It used to fade out through an alpha mask, which cut a word in half and re-rasterised the row
+     on every scroll. */
+  #recipes.scrolls::after, #command .crow.scrolls::after, #command .cmid.scrolls::after { content: ""; position: sticky; right: 0; order: 98; flex: none; align-self: stretch; width: calc(20 * var(--px)); background: var(--panel); border-left: 1px solid var(--divider); pointer-events: none; z-index: 2; }
+  #recipes.scrolls::before, #command .crow.scrolls::before, #command .cmid.scrolls::before { content: ""; position: sticky; right: calc(8 * var(--px)); order: 99; flex: none; align-self: center; width: calc(7 * var(--px)); height: calc(7 * var(--px)); margin-left: calc(-15 * var(--px) - var(--s1)); border-top: 2px solid var(--muted); border-right: 2px solid var(--muted); transform: rotate(45deg); pointer-events: none; z-index: 3; }
+  /* The actions are a fixed grid, one column per verb: turn left, turn right, extend, move, upgrade (two
+     columns: it carries a price), copy, demolish. A verb that does not apply leaves its column empty, so
+     the same verb is under the same spot of the screen whatever is selected, and the divider never moves. A
+     deposit's card uses the same columns: its facing where extend and move are, its build button where the
+     other spend button is, the whole-patch build over copy and demolish. */
+  #command .cact { --col: calc(44 * var(--px)); display: grid; grid-template-columns: repeat(8, var(--col)); grid-auto-rows: var(--slot-h); gap: var(--s1); align-items: center; align-content: center; flex: none; border-left: 1px solid var(--divider); padding-left: var(--s3); }
+  #command .cact > * { grid-row: 1; min-width: 0; }
+  #command .cact [data-c="ccw"] { grid-column: 1; }
+  #command .cact [data-c="cw"], #command .cact [data-bulk="rotate"] { grid-column: 2; }
+  #command .cact [data-c="extend"] { grid-column: 3; }
+  #command .cact [data-c="move"] { grid-column: 4; }
+  #command .cact [data-c="upgrade"], #command .cact [data-bulk="upgrade"], #command .cact [data-c="place"], #command .cact [data-c="build"] { grid-column: 5 / span 2; }
+  #command .cact [data-c="copy"], #command .cact [data-c="cancelmove"] { grid-column: 7; }
+  #command .cact [data-c="delete"] { grid-column: 8; }
+  #command .cact [data-c="patch"] { grid-column: 7 / span 2; }
+  #command .cact .facing { grid-column: 3 / span 2; }
+  /* RV-032: every action is an icon with its hotkey under it, the way a tool tile carries its price under
+     the sprite: the same 60px slot, so the card and the toolbar are one row of the same objects. Words live
+     in the tooltip. The glyph sits on the button's centre whether or not a key hangs under it, so a button
+     without one (upgrade) is not a top-heavy odd one out. */
+  #command .cact button { position: relative; width: 100%; min-width: 0; height: var(--slot-h); padding: 0 0 calc(6 * var(--px)); white-space: nowrap; font-size: var(--fs-md); line-height: var(--lh-body); gap: var(--s1); outline-offset: -2px; }
+  #command .cact .k { position: absolute; left: 0; right: 0; bottom: calc(3 * var(--px)); width: fit-content; min-width: calc(16 * var(--px)); margin: 0 auto; padding: 0 var(--s1); border-radius: var(--r-sm); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; color: var(--text); pointer-events: none; }
+  #command .cact button:disabled .k { color: var(--disabled); background: none; box-shadow: none; }
+  #command .cact button.active .k, #command .cact button.primary .k { background: var(--on-light); color: var(--sel); box-shadow: none; }
+  #command .cact button.primary:disabled .k { background: none; color: var(--disabled); }
+  #command .cact .cost { font-size: var(--fs-md); font-weight: 700; color: var(--money); }
+  #command .cact .cost.red { color: var(--danger-text); }
+  #command .cact button.primary .cost { color: var(--on-light); }
+  /* The number on the demolish button is a count, not a price. */
+  #command .cact button.danger .cost { color: inherit; }
+  #command .cact button.primary .cost.red { color: var(--danger-fill); }
+  #command .cact button:disabled .cost, #command .cact button.primary:disabled .cost { color: var(--disabled); }
+  body.hud-narrow #command .cid { width: calc(200 * var(--px)); }
+  /* A window too narrow for the full grid keeps every column and narrows them; the identity gives way too. */
+  body.hud-cramped #command .cact { --col: calc(36 * var(--px)); padding-left: var(--s2); }
+  body.hud-cramped #command .cid { width: calc(168 * var(--px)); }
+  body.hud-cramped #command { gap: var(--s2); }
+  /* The rotate glyph (glyphs.ts) wherever a button turns something: the cards, the touch strip, the Help
+     dialog. It is sized by the text around it and drawn in its colour, so a lit button darkens it too. */
+  svg.rg { width: 1.25em; height: 1.25em; flex: none; vertical-align: -0.25em; }
+  /* A deposit selection's facing on its card (docs/art/DESIGN.md D8): an arrow and a word at a fixed width,
+     so a turn swaps text without moving the buttons on either side of it. */
+  #command .cact .facing { display: inline-flex; align-items: center; justify-content: center; gap: var(--s1); padding: 0 var(--s1); color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; white-space: nowrap; }
+  #command .cact .facing .fa { color: var(--muted); font-size: var(--fs-md); line-height: 1; }
+
+  /* ---- recipe strip (D1, D2) */
+  /* BH-024: 13 recipes wrapped this strip to three rows, eating the map and burying the minimap.
+     One row, scrolled sideways when it is too long, with the building label pinned to the left. */
+  #recipes { position: relative; display: flex; align-items: center; gap: var(--s1); padding: calc(var(--s2) - 1px) var(--s2) calc(var(--s2) - 1px) 0; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+  #recipes::-webkit-scrollbar { display: none; }
+  #recipes .rl { display: inline-flex; align-items: center; align-self: stretch; gap: var(--s2); color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-right: var(--s1); position: sticky; left: 0; z-index: 1; background: var(--panel); padding: 0 var(--s2); flex: none; }
+  #recipes .rbtn { flex: none; }
+  #recipes.scrolls { padding-right: 0; }
+  #toolbar::-webkit-scrollbar { height: 6px; }
+  #toolbar::-webkit-scrollbar-thumb { background: var(--edge); border-radius: var(--r-sm); }
+
+  /* ---- toolbar */
+  /* BH-021 / BH-026: the toolbar is exactly one row at every size. It drops detail in steps that
+     ui.ts picks by measuring (cost → icon only) instead of wrapping to two or three rows
+     and stealing 120px of map. */
+  #toolbar { position: relative; padding: calc(var(--s2) - 1px) var(--s2); display: flex; gap: 0; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; align-items: center; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; overscroll-behavior-x: contain; }
+  #toolbar .tgroup { display: flex; flex: none; }
+  /* RV-031: the group heading is this rule plus the group's tooltip. Inside a group the slots are 4 apart,
+     between groups 25: the space says it, the 44px rule is a bonus. */
+  #toolbar .tgroup + .tgroup { position: relative; margin-left: var(--s3); padding-left: calc(13 * var(--px)); }
+  #toolbar .tgroup + .tgroup::before { content: ""; position: absolute; left: 0; top: var(--s2); bottom: var(--s2); width: 1px; background: var(--divider); }
+  #toolbar .tools { display: flex; gap: var(--s1); flex-wrap: nowrap; }
+  /* A slot is a sprite seated in a well, its price under it, its hotkey on the well's top-left corner, and
+     nothing else (RV-031); the name is in the tooltip. 56 × 60: nineteen of them fit one row at 1280. */
+  #toolbar .tool { flex: none; flex-direction: column; justify-content: flex-start; gap: calc(2 * var(--px)); width: var(--slot-w); height: var(--slot-h); min-height: 0; padding: calc(3 * var(--px)) 0 0; position: relative; outline-offset: -2px; }
+  /* The well is a step above the button, not below it: on a near-black well the hue-less logistics sprites
+     went murky. It seats a 36px sprite edge to edge in height. */
+  #toolbar .tool img.ic, #toolbar .tool .glyph { width: calc(40 * var(--px)); height: calc(36 * var(--px)); padding: 0 calc(2 * var(--px)); background: color-mix(in srgb, var(--raised) 70%, var(--hover)); border-radius: var(--r-sm); object-fit: contain; }
+  @media (hover: hover) { #toolbar .tool:hover:not(.locked):not(.active) img.ic, #toolbar .tool:hover:not(.locked):not(.active) .glyph { background: color-mix(in srgb, var(--hover) 70%, var(--edge)); } }
+  #toolbar .tool .glyph { font-size: calc(24 * var(--px)); line-height: 1; display: flex; align-items: center; justify-content: center; }
+  #toolbar .tool .c { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; color: var(--money); white-space: nowrap; min-height: var(--lh-sm); }
+  /* Saving up for it: the sprite stays whole, the price alone says no. */
+  #toolbar .tool.poor .c { color: var(--danger-text); }
+  /* The hotkey is a plate of the panel's own rubber with a 1px ring, so it reads as a label laid on the
+     well's corner and not as a dark smudge on the sprite. */
+  #toolbar .tool .k { position: absolute; top: calc(3 * var(--px)); left: calc(7 * var(--px)); min-width: calc(16 * var(--px)); padding: 0 var(--s1); border-radius: var(--r-sm); background: var(--panel); box-shadow: 0 0 0 1px var(--edge); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; color: var(--text); text-align: center; }
+  /* In hand: cream. The well tints with it so the sprite keeps a seat; the price goes to the dark gold that
+     reads on cream. */
+  #toolbar .tool.active img.ic, #toolbar .tool.active .glyph { background: color-mix(in srgb, var(--sel) 86%, var(--on-light)); }
+  #toolbar .tool.active .c { color: var(--money-on-light); }
+  #toolbar .tool.active .k { background: var(--on-light); color: var(--sel); box-shadow: none; }
+  /* Demolish is a slot like the others; only its glyph is red, until it is the mode in hand. */
+  #toolbar .tool.danger .glyph { color: var(--danger); }
+  /* It has no price line, so its well sits in the middle of the slot instead of leaving 20px of nothing under it. */
+  #toolbar .tool.danger { justify-content: center; padding: 0; }
+  #toolbar .tool.danger .c { display: none; }
+  #toolbar .tool.danger.active .glyph { background: color-mix(in srgb, var(--danger-fill) 80%, var(--on-light)); color: var(--on-danger); }
+  #toolbar .tool.danger.active .k { background: var(--on-light); color: var(--on-danger); box-shadow: none; }
+  /* Locked: recessed, a solid quiet edge (dashes break at a 6px corner), the sprite a flat silhouette.
+     BH-054: the label under it keeps its own colour rather than dimming with the button. */
+  #toolbar .tool.locked, #toolbar .tool.locked:hover, #toolbar .tool.locked:active { background: var(--well); border-color: var(--divider); cursor: help; transform: none; }
+  #toolbar .tool.locked img.ic, #toolbar .tool.locked .glyph { background: none; filter: brightness(0) invert(0.32); }
+  #toolbar .tool.locked .c { color: var(--disabled); filter: grayscale(1); }
+  @media (hover: hover) { #toolbar .tool.locked:hover img.ic { filter: brightness(0) invert(0.45); } }
+  #toolbar .tool:focus-visible { z-index: 1; }
+  /* Narrowest step (small window or UI scale 1.4): icon and hotkey only. The cost stays in the
+     accessibility tree and in the tooltip, it just stops taking room (BH-021). */
+  #toolbar.dense .tool { width: calc(44 * var(--px)); justify-content: center; padding: 0; }
+  #toolbar.dense .tool img.ic, #toolbar.dense .tool .glyph { width: calc(36 * var(--px)); height: calc(36 * var(--px)); padding: calc(2 * var(--px)); }
+  #toolbar.dense .tool .k { top: calc(11 * var(--px)); left: calc(3 * var(--px)); }
+  #toolbar.dense .tool .c { position: absolute; width: 1px; height: 1px; min-height: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #toolbar.dense .tgroup + .tgroup { margin-left: var(--s2); padding-left: calc(9 * var(--px)); }
+  /* What is in hand, as a plate: never bare text on terrain. Same 8px gutter as every panel. */
+  #status { position: absolute; left: var(--s2); bottom: calc(var(--bottom-h) + var(--s2) + var(--s2)); max-width: calc(100vw - 2 * var(--s2)); background: var(--panel); border: 1px solid var(--edge); border-radius: var(--r-sm); padding: calc(2 * var(--px)) var(--s2); font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 600; color: var(--text); pointer-events: none; z-index: 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #status:empty { display: none; }
+
+  /* ---- tooltip + toasts (F2) */
+  #tooltip { position: absolute; pointer-events: none; padding: var(--s2) var(--s3); font-size: var(--fs-sm); line-height: var(--lh-sm); display: none; z-index: 8; max-width: calc(288 * var(--px)); }
+  #tooltip b { font-size: var(--fs-body); line-height: var(--lh-body); }
+  #toasts { position: absolute; left: 50%; top: calc(var(--s2) + var(--top-h) + var(--s2)); transform: translateX(-50%); display: flex; flex-direction: column; gap: var(--s2); pointer-events: none; z-index: 7; }
+  /* A toast is a small panel with a glyph in a fixed box: no coloured side stripe. */
+  .toast { display: flex; gap: var(--s2); align-items: flex-start; background: var(--panel); border: 1px solid var(--edge-strong); border-radius: var(--r-md); padding: calc(var(--s2) - 1px) var(--s3); min-width: calc(240 * var(--px)); max-width: calc(440 * var(--px)); font-weight: 600; box-shadow: var(--cast); animation: fade 4s forwards; }
+  .toast .ti { flex: none; width: calc(20 * var(--px)); text-align: center; font-weight: 700; color: var(--muted); }
+  .toast.error .ti { color: var(--danger-text); }
+  .toast.good .ti { color: var(--ok); }
+  @keyframes fade { 0% { opacity: 0; } 6% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* ---- overlay: start screen, menu, dialogs (A1–A4). A flat scrim: nothing in this game is blurred. */
+  #overlay { position: fixed; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; z-index: 20; padding: var(--s3); }
+  .dialog { background: var(--panel); border: 1px solid var(--edge-strong); border-radius: var(--r-lg); box-shadow: var(--cast-dialog); padding: var(--s4); width: min(calc(468 * var(--px)), 94vw); max-height: 92vh; overflow: auto; outline: none; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  .dialog .dt { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s3); min-height: var(--ctl); }
+  .dialog .dt h2 { font-size: var(--fs-title); line-height: var(--lh-title); letter-spacing: -0.01em; flex: 1; }
+  .dialog .db { margin: 0 0 var(--s3); color: var(--text); }
+  .dialog .da { display: flex; gap: var(--s2); justify-content: flex-end; margin-top: var(--s4); flex-wrap: wrap; }
+  .dialog .dk { margin-top: var(--s2); font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); }
+  .dialog .sh { margin: var(--s3) 0 var(--s1); }
+  .dialog .menu { display: flex; flex-direction: column; gap: var(--s1); }
+  .dialog .menu button { justify-content: flex-start; min-height: calc(40 * var(--px)); padding: 0 var(--s3); }
+  .dialog .menu button kbd { margin-left: auto; }
+  .dialog .menu-info { margin-bottom: var(--s2); }
+  /* Game speed inside the menu (RV-030): one row of equal buttons above the menu list. */
+  .dialog .speedrow { display: flex; gap: var(--s1); margin-bottom: var(--s2); }
+  .dialog .speedrow button { flex: 1; padding: 0 var(--s1); font-weight: 700; }
+  .dialog .form { display: flex; flex-direction: column; gap: var(--s2); }
+  .dialog .form.row { flex-direction: row; align-items: flex-end; }
+  .dialog .form label { display: flex; flex-direction: column; gap: var(--s1); }
+  .dialog .form label > span:first-child { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); }
+  .dialog .form label.check { flex-direction: row; align-items: center; gap: var(--s2); cursor: pointer; }
+  .dialog .form label.check > span { color: var(--text); font-size: var(--fs-body); line-height: var(--lh-body); }
+  .dialog .form .grow { flex: 1; }
+  .dialog .srow { display: flex; align-items: center; gap: var(--s2); padding: var(--s2) 0; border-bottom: 1px solid var(--divider); }
+  .dialog .srow .sn { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .dialog .srow .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dialog .srow .sb { display: flex; gap: var(--s1); }
+  .dialog .cb { max-height: 40vh; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  /* Help scrolls between two rules and stops on a whole line: everything in it sits on the 20px line grid and
+     the window is 22 lines, so it never looks cut off. */
+  .dialog .help { max-height: calc(var(--lh-body) * 22 + 2px); padding-top: 0; overflow: auto; border-top: 1px solid var(--divider); border-bottom: 1px solid var(--divider); padding-right: var(--s2); scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  .dialog .help h3 { font-size: var(--fs-md); line-height: var(--lh-body); margin: var(--lh-body) 0 0; color: var(--text); }
+  .dialog .help .hs:first-child h3, .dialog .help > h3:first-child { margin-top: 0; }
+  .dialog .help p { margin: 0; }
+  .dialog .help .keys { display: grid; grid-template-columns: auto 1fr; gap: 0 var(--s4); align-items: baseline; }
+  .dialog .help .keys span:first-child { white-space: nowrap; }
+  .dialog .help ul { margin: 0; padding-left: var(--s4); }
+
+  /* ---- research tree (T-0009): the technologies as a dependency tree on its own full-screen
+     layer. Tiers (dependency depth) run top to bottom, the nodes of one tier left to right, and a
+     connector goes from every node to each prerequisite it has. Geometry is written in rem by
+     techtree.ts, so the whole tree follows the UI scale. The node states below only carry the new tokens;
+     their design (02 §8) is in the glyphs & research block at the end of this sheet. */
+  .dialog.dlg-tech { width: min(112rem, 96vw); height: 92vh; max-height: 92vh; padding: 0; overflow: hidden; display: flex; }
+  .tt { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .tth { display: flex; align-items: center; gap: var(--s3); min-height: calc(56 * var(--px)); padding: var(--s2) var(--s3) var(--s2) var(--s4); border-bottom: 1px solid var(--divider); flex-wrap: wrap; }
+  .tth h2 { font-size: var(--fs-title); line-height: var(--lh-title); letter-spacing: -0.01em; }
+  .tth .tt-sold { margin-left: auto; }
+  .tth #tt-q { width: calc(240 * var(--px)); max-width: 40vw; }
+  /* − and + are one segmented control: a shared edge, the radius only on the outside. */
+  .ttz { display: flex; gap: 0; }
+  .ttz button, .ttz button.icon { width: var(--ctl); padding: 0; font-size: var(--fs-md); background: var(--raised); border-color: var(--edge); color: var(--text); }
+  @media (hover: hover) { .ttz button.icon:hover:not(:disabled) { background: var(--hover); } }
+  .ttz + .close { margin-left: var(--s1); }
+  .ttz button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .ttz button + button { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+  .ttb { flex: 1; display: flex; min-height: 0; }
+  /* T-0015: the graph pans by dragging its background, so a drag must never highlight the tier rail
+     or a node's text on the way. It has to hold whether or not the pan is capturing the pointer,
+     hence the whole graph rather than only .panning. The detail column (.ttd) stays selectable so
+     a tech's text can still be copied (BH-060). */
+  .ttg { flex: 1; min-width: 0; overflow: auto; position: relative; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; cursor: grab; user-select: none; -webkit-user-select: none; background: var(--well); }
+  .ttg.panning { cursor: grabbing; }
+  .ttpad { position: relative; }
+  .ttinner { position: relative; transform-origin: 0 0; }
+  .ttlines { position: absolute; left: 0; top: 0; overflow: visible; }
+  .ttlines path { fill: none; stroke: var(--edge); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .ttlines path.on { stroke: var(--sel); stroke-width: 3; }
+  .ttt { position: absolute; left: 0; width: 3.6rem; text-align: right; padding-top: 0.15rem; }
+  .ttn { position: absolute; width: 11rem; height: 5rem; min-height: 0; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 0.1rem; padding: 0.35rem 0.45rem; text-align: left; border-radius: var(--r-md); background: var(--raised); }
+  .ttn .nm { font-weight: 600; font-size: var(--fs-sm); line-height: var(--lh-sm); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ttn .tk { font-style: normal; margin-right: 0.15rem; }
+  .ttn .un { display: flex; align-items: center; gap: 0.2rem; margin-top: auto; overflow: hidden; height: 1.4rem; }
+  .ttn .un .tu { position: relative; display: inline-flex; align-items: center; }
+  .ttn .un .tu i { font-style: normal; font-size: var(--fs-sm); font-weight: 700; color: var(--muted); margin-left: -0.3rem; align-self: flex-start; line-height: 1; }
+  .ttn .un .tu.wide { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+  .ttn .bar { height: var(--s1); margin: 0.2rem 0 0; }
+  .ttn.done, .ttn.done:hover { background: var(--pressed); border-color: var(--divider); }
+  .ttn.done .nm { color: var(--muted); }
+  .ttn.done .tk { color: var(--ok); }
+  .ttn.done .bar > div { background: color-mix(in srgb, var(--ok) 55%, transparent); }
+  .ttn.available { border-color: var(--sel); }
+  .ttn.locked, .ttn.locked:hover { background: var(--well); border-color: var(--divider); }
+  .ttn.locked .nm { color: var(--disabled); }
+  .ttn.locked img.ic { opacity: 0.6; }
+  .ttn.on { box-shadow: 0 0 0 2px var(--well), 0 0 0 4px var(--sel); }
+  /* A selection reads as one line of descent: the node, what it needs, what it opens. The rest is
+     pushed back rather than hidden — BH-054: status is carried by border, ground and the marker,
+     never by dimming alone, so what a node says stays readable whatever is selected. */
+  /* A search wins over the selection's dimming: what was looked for is what must stand out. */
+  .tt.filtered .ttn.miss { opacity: 0.1; }
+  .tt.filtered .ttn:not(.miss) { opacity: 1; }
+  .ttd { width: calc(288 * var(--px)); flex: none; border-left: 1px solid var(--divider); overflow: auto; padding: var(--s3) var(--s4); scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
+  .ttd h3 { font-size: var(--fs-md); line-height: var(--lh-body); }
+  /* Lab income sits in the header on a desktop and at the foot of the detail sheet on a phone, where the
+     header has no row to spare; both are always in the markup. */
+  .ttd .tt-sold-foot { display: none; margin-top: var(--s3); }
+  .ttd h4 { margin: var(--s3) 0 var(--s1); }
+  .ttd .ds { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); margin-top: calc(2 * var(--px)); }
+  .ttd .ds.done { color: var(--ok); }
+  .ttd .ds.available { color: var(--text); }
+  .ttd .item .prog { margin-left: var(--s1); }
+  .ttls { display: flex; flex-wrap: wrap; gap: var(--s1); }
+  .ttl { font-size: var(--fs-sm); min-height: calc(28 * var(--px)); padding: 0 var(--s2); }
+  .ttl.done { color: var(--ok); }
+  .ttl.locked { color: var(--muted); }
+  /* A narrow window puts the detail under the tree instead of squeezing the tree to a sliver. The
+     hook is the density class ui.ts measures in rem (BH-021/026/050), not a px media query, so a
+     larger UI scale stacks at the same apparent width. */
+  body.hud-cramped .ttb { flex-direction: column; }
+  body.hud-cramped .ttd { width: auto; flex: none; max-height: 40%; border-left: none; border-top: 1px solid var(--divider); }
+  /* The ✕ and the zoom pair stay on the title row; the search takes the row under them. */
+  body.hud-cramped .ttz { order: 1; }
+  body.hud-cramped .tth .close { order: 1; margin-left: auto; }
+  body.hud-cramped .tth #tt-q { width: 100%; max-width: none; order: 2; }
+
+  .start { display: flex; flex-direction: column; gap: var(--s4); }
+  .start .brand { display: flex; align-items: center; gap: var(--s4); }
+  /* The belt is the logo: a rubber tile with one cream chevron on it. */
+  .start .logo { position: relative; width: calc(48 * var(--px)); height: calc(48 * var(--px)); border-radius: var(--r-lg); background: var(--bg); border: 1px solid var(--edge-strong); box-shadow: var(--cast); flex: none; }
+  .start .logo::before { content: ""; position: absolute; left: calc(11 * var(--px)); top: calc(15 * var(--px)); width: calc(16 * var(--px)); height: calc(16 * var(--px)); border-top: calc(5 * var(--px)) solid var(--sel); border-right: calc(5 * var(--px)) solid var(--sel); transform: rotate(45deg); }
+  .start h1 { font-size: calc(28 * var(--px)); line-height: calc(32 * var(--px)); letter-spacing: -0.01em; }
+  .start .sub { margin: calc(2 * var(--px)) 0 0; color: var(--muted); }
+  .start .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s3); }
+  @media (max-width: 900px) { .start .cards { grid-template-columns: 1fr; } }
+  .start .card { background: var(--well); border: 1px solid var(--divider); border-radius: var(--r-md); padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2); min-height: calc(208 * var(--px)); }
+  .start .card h2 { font-size: var(--fs-md); line-height: var(--lh-body); color: var(--text); }
+  .start .card .cb { flex: 1; }
+  .start .card .da { margin-top: auto; }
+  .start .card .srow { padding: var(--s1) 0; }
+  .start .foot { margin: 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); text-align: center; }
+
+  .victory { text-align: center; }
+  .victory .vtoken { display: flex; justify-content: center; margin: var(--s2) 0; }
+  .victory h2 { font-size: var(--fs-title); line-height: var(--lh-title); color: var(--text); }
+  .victory .vstats { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s2); margin: var(--s3) 0; }
+  .victory .vstats > div { background: var(--well); border: 1px solid var(--divider); border-radius: var(--r-md); padding: var(--s2); display: flex; flex-direction: column; gap: calc(2 * var(--px)); }
+  .victory .vstats .l { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); }
+  .victory .vstats .v { font-size: var(--fs-md); line-height: var(--lh-body); font-weight: 700; }
+  .victory .da { justify-content: center; }
+
+  /* The loading screen (GROUND-GL.md §6): a state of the app, over everything but the connection notice, from the
+     moment a world arrives until its ground is baked and the first frame is drawn. Nothing in it moves; the bar's
+     width changes between steps and that is all. */
+  #loading { position: absolute; inset: 0; z-index: 29; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s3); background: var(--bg); color: var(--text); user-select: none; -webkit-user-select: none; }
+  #loading .name { font-size: var(--fs-title); font-weight: 700; letter-spacing: 0.02em; }
+  #loading .step { font-size: var(--fs-body); line-height: var(--lh-body); color: var(--muted); min-height: var(--lh-body); }
+  #loading .bar { width: min(calc(320 * var(--px)), 70vw); height: calc(8 * var(--px)); background: var(--well); border: 1px solid var(--edge); border-radius: 6px; overflow: hidden; }
+  #loading .bar > i { display: block; height: 100%; width: 0; background: var(--sel); border-radius: 6px; }
+
+  #connect { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: var(--fs-md); font-weight: 600; color: var(--muted); background: var(--bg); z-index: 30; }
+
+  /* BH-068: a box-select or belt drag started on the map must not highlight the chrome it passes
+     over. The side panel and dialogs stay selectable so the seed and encyclopedia text can still
+     be copied (BH-060). */
+  #topbar, #toolbar, #recipes, #command, #status, #objectives, #tooltip, #toasts { user-select: none; -webkit-user-select: none; }
+
+  /* BH-036: body.reduced-motion forces every animation-duration to ~0, which jumps these two
+     "forwards"-filled animations straight to their end frame (opacity: 0) — reduced motion was
+     silently hiding every toast and the save dot instead of just skipping their fade. */
+  body.reduced-motion .toast { animation: none !important; opacity: 1; transform: none; }
+  body.reduced-motion #saved-dot.show { animation: none !important; opacity: 1; }
+
+  /* ---- touch devices (docs/MOBILE.md §4.4, §4.6, §4.7). Everything below is scoped to body.touch (coarse
+     pointer) or body.phone (touch and under 760px wide), so the desktop layout above is untouched. The
+     rules are: regions stay where they are, nothing animates, every control is at least 40px on its
+     short side, and the safe areas of a notched phone are respected. A narrow window without touch gets the
+     phone layout too (ui.ts: body.phone is any window under 760px), because the desktop arrangement cannot
+     fit there; it keeps its tooltips and pointer behaviour, and takes the sizes below with the layout. */
+  body.touch, body.phone {
+    --sa-t: env(safe-area-inset-top, 0px);
+    --sa-b: env(safe-area-inset-bottom, 0px);
+    --sa-l: env(safe-area-inset-left, 0px);
+    --sa-r: env(safe-area-inset-right, 0px);
+    /* The top bar has to hold 44px buttons with 4 around them, whatever the UI scale. */
+    --top-h: max(calc(52 * var(--px)), 52px);
+    /* The undo pair: two 40px buttons, 2px gap, 2px padding, 1px border. */
+    --undo-w: 88px;
+    --undo-h: 46px;
+    /* A finger's slot: 60 × 64 with a 36px sprite. */
+    --slot-w: calc(60 * var(--px));
+    --slot-h: calc(64 * var(--px));
+    --bar-h: max(calc(80 * var(--px)), 80px);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  /* No page scroll and no rubber-banding: the map is the only thing that moves, and it moves on the
+     canvas. Panels that overflow (the side panel, dialogs, the toolbar) scroll inside themselves. */
+  html:has(> body.touch), body.touch { position: fixed; inset: 0; width: 100%; height: 100%; overscroll-behavior: none; }
+  body.touch #game { touch-action: none; }
+  body.touch .panel, body.touch #overlay { touch-action: pan-x pan-y; }
+  body.touch #tooltip { display: none !important; }
+  /* Hotkey badges are noise without a keyboard: the `.k` tags on tools, the <kbd> in buttons and
+     the "Enter confirm · Esc cancel" lines under dialogs. The Help dialog keeps its <kbd>s: that is
+     documentation, not a control. */
+  :is(body.touch, body.phone) button kbd, :is(body.touch, body.phone) .k, :is(body.touch, body.phone) .dk { display: none; }
+  /* 40px targets everywhere a finger lands. Padding stays; only the floor changes. */
+  :is(body.touch, body.phone) button { min-height: 40px; min-width: 40px; }
+  /* The floor has to outrank the desktop sizes, which are written with IDs and so beat `body.touch button`. */
+  :is(body.touch, body.phone) #topbar #btn-menu, :is(body.touch, body.phone) #topbar #btn-more { width: 44px; height: 44px; }
+  :is(body.touch, body.phone) #research-bar { width: 44px; height: 44px; min-height: 44px; }
+  :is(body.touch, body.phone) #command .crow .rbtn, :is(body.touch, body.phone) #recipes .rbtn, :is(body.touch, body.phone) .ttl, :is(body.touch, body.phone) #side .bpact button { min-height: 40px; }
+  :is(body.touch, body.phone) #command .crow .rbtn.none { width: 40px; }
+  body.touch select, body.touch input[type=text], body.touch input[type=search], body.touch input:not([type]) { min-height: 40px; }
+  body.touch input[type=checkbox] { width: 24px; height: 24px; }
+  body.touch #side .opt { min-height: 40px; align-items: center; }
+  body.touch #side tr[data-item] td { height: 40px; }
+  body.touch #side details summary { min-height: 40px; display: flex; align-items: center; }
+  body.touch #side .erow { min-height: 44px; }
+  body.touch #objectives .check { width: 24px; height: 24px; }
+  /* The slot on touch: no hotkey, a bigger sprite. */
+  body.touch #toolbar .tool img.ic, body.touch #toolbar .tool .glyph { width: calc(44 * var(--px)); height: calc(40 * var(--px)); padding: calc(2 * var(--px)) var(--s1); }
+
+  /* Safe areas: the bars hug the screen edges, so they take the insets; the panels hang off the bars. */
+  :is(body.touch, body.phone) #topbar { top: calc(var(--s2) + var(--sa-t)); left: calc(var(--s2) + var(--sa-l)); right: calc(var(--s2) + var(--sa-r)); height: var(--top-h); padding: 0 var(--s1); }
+  body.touch #objectives, body.touch #side, body.touch #toasts { top: calc(var(--s2) + var(--top-h) + var(--s2) + var(--sa-t)); }
+  body.touch #objectives { left: calc(var(--s2) + var(--sa-l)); }
+  body.touch #side { right: calc(var(--s2) + var(--sa-r)); bottom: calc(var(--bottom-h) + var(--s2) + var(--s2) + var(--minimap-h) + var(--sa-b)); }
+  body.touch #bottom { left: calc(var(--s2) + var(--sa-l)); right: calc(var(--s2) + var(--sa-r)); bottom: calc(var(--s2) + var(--sa-b)); }
+  :is(body.touch, body.phone) #toasts { left: calc(var(--s2) + var(--sa-l)); right: calc(var(--s2) + var(--sa-r)); transform: none; align-items: center; }
+  :is(body.touch, body.phone) .toast { min-width: 0; max-width: 100%; }
+  /* The undo pair (§4.6): bottom-left, just above the bottom bar, where #status starts on a desktop.
+     The status plate moves right to make room and stops short of the minimap. */
+  body.touch #undo { display: flex; position: absolute; left: calc(var(--s2) + var(--sa-l)); bottom: calc(var(--bottom-h) + var(--s2) + var(--sa-b) + var(--s2)); gap: 2px; padding: 2px; z-index: 3; }
+  body.touch #undo button { width: 40px; height: 40px; padding: 0; font-size: max(18px, calc(18 * var(--px))); line-height: 1; border-radius: var(--r-md); }
+  body.touch #status { left: calc(var(--s2) + var(--sa-l) + var(--undo-w) + var(--s2)); max-width: calc(100vw - var(--undo-w) - var(--minimap-w) - 5 * var(--s2) - var(--sa-l) - var(--sa-r)); bottom: calc(var(--bottom-h) + var(--s2) + var(--sa-b) + var(--s2)); }
+  /* A cramped touch top bar stacks the income under the gold, so a 768px tablet still fits the
+     44px menu and panel buttons beside it. */
+  :is(body.touch, body.phone).hud-cramped #topbar .stat.gold { display: grid; grid-template-columns: auto auto; column-gap: var(--s1); row-gap: 0; align-items: center; }
+  :is(body.touch, body.phone).hud-cramped #topbar .stat.gold .bal { display: contents; }
+  :is(body.touch, body.phone).hud-cramped #topbar .stat.gold .bal > span:first-child { grid-row: 1 / 3; align-self: center; }
+  :is(body.touch, body.phone).hud-cramped #topbar .stat .v { min-width: 0; text-align: left; }
+  :is(body.touch, body.phone).hud-cramped #topbar .stat .sub { margin-left: 0; }
+  :is(body.touch, body.phone).hud-cramped #topbar #saved-dot { grid-row: 1 / 3; grid-column: 3; }
+  /* The tool strip on touch (§4.6): the sticky lead holds the tool's icon and name, the two rotate buttons
+     and the facing, so they stay put while the recipe chips scroll under them. The facing has a fixed width
+     so the chips do not shift between "east" and "north"; phones show it as an arrow (below). */
+  body.touch #recipes .rl { text-transform: none; letter-spacing: 0; font-weight: 600; gap: var(--s1); }
+  body.touch #recipes .rot { width: 40px; padding: 0; flex: none; font-size: max(18px, calc(18 * var(--px))); line-height: 1; }
+  body.touch #recipes .facing { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; flex: none; min-width: calc(72 * var(--px)); font-weight: 600; }
+  body.touch #recipes .facing .fa { display: none; }
+  /* The command card on touch keeps the desktop's action grid; without a keyboard the buttons carry no key. */
+  /* A phone held sideways is touch but not `phone`: there is width for the desktop arrangement but not
+     height. The side panel moves left of the minimap so it can run down to the bottom bar instead of
+     stopping 160px above it, and stays clear of the objectives on the left. */
+  @media (max-height: 520px) {
+    body.touch:not(.phone) #side { right: calc(var(--minimap-w) + 2 * var(--s2) + var(--sa-r)); bottom: calc(var(--bottom-h) + 2 * var(--s2) + var(--sa-b)); min-height: 0; width: min(calc(360 * var(--px)), calc(100vw - 300 * var(--px) - var(--minimap-w) - 5 * var(--s2) - var(--sa-l) - var(--sa-r))); }
+  }
+
+  /* ---- phones (§4.7): body.phone — touch and narrower than 760px. */
+  body.phone { --bar-h: 96px; --obj-h: 42px; }
+  /* The renderer reads the minimap's box from here. */
+  body.phone { --minimap-w: 100px; --minimap-h: 100px; }
+  /* Top bar: menu · gold +income · tokens · research · panels — the same five things as the desktop, tighter. */
+  body.phone #topbar { gap: var(--s1); overflow: hidden; }
+  body.phone #topbar .stat { min-width: 0; flex: none; }
+  /* Objectives: one line (`2/8 · Build an extractor ▸`); tapping it expands in place, ✕ hides. */
+  body.phone #objectives { left: calc(var(--s2) + var(--sa-l)); right: calc(var(--s2) + var(--sa-r)); width: auto; max-width: none; padding: 0 var(--s1) 0 var(--s2); z-index: 3; }
+  body.phone #objectives .oh { margin-bottom: 0; gap: var(--s1); }
+  body.phone #objectives .oc { flex: 1; min-width: 0; justify-content: flex-start; background: none; border-color: transparent; padding: 0 var(--s1); gap: var(--s1); text-align: left; }
+  body.phone #objectives .oc .on { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  body.phone #objectives .oc .op { flex: none; }
+  body.phone #objectives .oc .chev { color: var(--muted); flex: none; margin-left: auto; }
+  body.phone #objectives .ob { padding: 0 var(--s1) var(--s2); }
+  body.phone #objectives .ob .ostep { padding: var(--s1) 0; }
+  /* Side panel: full width between the top bar and the minimap row (the minimap and the undo pair stay
+     fully visible under it, as on a desktop). When the objectives line is showing the panel starts
+     under it, so the two never overlap. */
+  body.phone #side { left: calc(var(--s2) + var(--sa-l)); right: calc(var(--s2) + var(--sa-r)); width: auto; max-width: none; min-height: 0; }
+  body.phone:has(#objectives:not([hidden])) #side, body.phone:has(#objectives:not([hidden])) #toasts { top: calc(var(--s2) + var(--top-h) + var(--s2) + var(--sa-t) + var(--obj-h) + var(--s2)); }
+  body.phone #side .rgrid { grid-template-columns: 1fr; }
+  /* Bottom: the toolbar is the dense step and scrolls sideways. The toolbar and the command card share one
+     fixed slot height, tall enough for the card's two rows, so a select never moves the bar. */
+  body.phone #status { display: none; }
+  /* Tools are 48 wide on a phone (Android's 48dp) and carry their price, as on a desktop: a phone player has
+     no tooltip to find out what a thing costs. The bar is 96 tall for the card's two rows, so there is room. */
+  body.phone #toolbar { padding: 0 var(--s1); }
+  body.phone #toolbar .tools { gap: var(--s1); }
+  body.phone #toolbar .tool, body.phone #toolbar.dense .tool { width: 48px; height: 64px; justify-content: center; gap: 2px; padding: 0; }
+  body.phone #toolbar .tool img.ic, body.phone #toolbar .tool .glyph, body.phone #toolbar.dense .tool img.ic, body.phone #toolbar.dense .tool .glyph { width: 40px; height: 40px; padding: 2px; }
+  body.phone #toolbar.dense .tool .c { position: static; width: auto; height: auto; min-height: var(--lh-sm); overflow: visible; clip-path: none; }
+  body.phone #toolbar .tool.danger .c { display: none; }
+  body.phone #recipes { padding: calc(var(--s1) - 1px) var(--s1) calc(var(--s1) - 1px) 0; }
+  body.phone #recipes .rl { padding: 0 var(--s1); }
+  body.phone #recipes.scrolls { padding-right: 0; }
+  /* The strip's lead on a phone: icon, the rotate pair and the facing as an arrow, so most of the width is chips. */
+  body.phone #recipes .rl .rn-name, body.phone #recipes .facing .fw { display: none; }
+  /* …unless the strip carries no chips, in which case the name is the only thing naming the tool. */
+  body.phone #recipes.named .rl .rn-name { display: inline; }
+  body.phone #recipes .facing .fa { display: inline; font-size: max(16px, calc(16 * var(--px))); color: var(--muted); }
+  body.phone #recipes .facing { min-width: calc(20 * var(--px)); text-align: center; }
+  /* The command card on a phone is two rows in the bar and one strip over it. Row 1 is the identity on one
+     line: a 24px portrait, the name, the tier and the lamp. Row 2 is the action grid, 44px buttons in fixed
+     columns from the left (the counter-clockwise turn is dropped: clockwise three times and the corner
+     handles do the same). What the machine makes and holds is a strip above the bar, the slot the tool
+     strip uses while building, so the bar itself is the same box in every state. Px sizes: the card must
+     come out at exactly --bar-h at every UI scale. */
+  body.phone #command { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 34px 44px; gap: 4px; align-items: center; padding: 6px 8px; height: var(--bar-h); overflow: visible; }
+  body.phone #command .cid { grid-row: 1; width: auto; min-width: 0; gap: 8px; }
+  body.phone #command .cid img.ic, body.phone #command .cid .glyph { width: 28px; height: 28px; padding: 2px; }
+  body.phone #command .cid .glyph .g { width: 20px; height: 20px; }
+  body.phone #command .ctext { flex-direction: row; align-items: baseline; gap: 8px; }
+  body.phone #command .cn { flex: 0 1 auto; min-width: 0; font-size: var(--fs-body); line-height: var(--lh-body); }
+  body.phone #command .cs { flex: 1 1 0; min-width: 0; }
+  body.phone #command .cact { grid-row: 2; --col: 44px; grid-template-columns: repeat(7, 44px); grid-auto-rows: 44px; gap: 4px; justify-content: start; border-left: none; padding-left: 0; }
+  body.phone #command .cact button { height: 44px; min-height: 44px; padding: 0; }
+  body.phone #command .cact [data-c="ccw"] { display: none; }
+  body.phone #command .cact [data-c="cw"], body.phone #command .cact [data-bulk="rotate"] { grid-column: 1; }
+  body.phone #command .cact [data-c="extend"] { grid-column: 2; }
+  body.phone #command .cact [data-c="move"] { grid-column: 3; }
+  body.phone #command .cact [data-c="upgrade"], body.phone #command .cact [data-bulk="upgrade"], body.phone #command .cact [data-c="place"] { grid-column: 4 / span 2; }
+  body.phone #command .cact [data-c="copy"], body.phone #command .cact [data-c="cancelmove"] { grid-column: 6; }
+  body.phone #command .cact [data-c="delete"] { grid-column: 7; }
+  body.phone #command .cact .facing { grid-column: 2; min-width: 0; padding: 0; }
+  body.phone #command .cact [data-c="build"] { grid-column: 3 / span 3; }
+  body.phone #command .cact [data-c="patch"] { grid-column: 6 / span 2; }
+  body.phone #command .cmid { position: absolute; left: -1px; right: -1px; bottom: calc(100% + var(--s2)); height: 48px; flex-direction: row; justify-content: flex-start; align-items: center; gap: var(--s2); padding: 0 var(--s1) 0 var(--s2); background: var(--panel); border: 1px solid var(--edge-strong); border-radius: var(--r-lg); box-shadow: var(--cast); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
+  body.phone #command .cmid.scrolls { padding-right: 0; }
+  body.phone #command .cmid::-webkit-scrollbar { display: none; }
+  body.phone #command .cmid .crow { flex: none; overflow: visible; min-height: 0; scroll-snap-type: none; }
+  body.phone #command .cmid .crow:empty { display: none; }
+  body.phone #command .cmid .crow + .crow:not(:empty) { border-left: 1px solid var(--divider); padding-left: var(--s2); }
+  body.phone #command .cmid > .stop { padding-right: var(--s1); }
+  /* A building's live row (status, progress, buffers) comes first on a phone: "Coal on the input
+     belt" must not sit behind fourteen recipe chips. The divider moves to the recipe row with it. */
+  body.phone #command #cdyn { order: -1; border-left: none; padding-left: 0; }
+  body.phone #command .cmid:has(#cdyn:not(:empty)) #cinfo { border-left: 1px solid var(--divider); padding-left: var(--s2); }
+  /* A phone's side panel fills the width under the top bar, which is where toasts land: while it is open they
+     use a second fixed anchor over the bottom bar, so neither covers the other. Two places, never a moving one. */
+  body.phone.side-open #toasts, body.phone.side-open:has(#objectives:not([hidden])) #toasts { top: auto; bottom: calc(var(--bottom-h) + var(--undo-h) + 3 * var(--s2) + var(--sa-b)); flex-direction: column-reverse; }
+  /* Dialogs: nearly the whole screen, scrolling inside; the start screen's cards stack. */
+  body.phone #overlay { padding: var(--s2); padding-top: calc(var(--s2) + var(--sa-t)); padding-bottom: calc(var(--s2) + var(--sa-b)); }
+  body.phone .dialog { width: 100% !important; max-height: 92dvh; padding: var(--s3); }
+  body.phone .dialog .cb { max-height: 34vh; }
+  body.phone .dialog .help { max-height: none; border-top: none; border-bottom: none; padding-right: 0; }
+  /* The tree keeps the whole screen on a phone; the stacking itself is the hud-cramped rule above. */
+  body.phone .dialog.dlg-tech { padding: 0; max-height: 92dvh; }
+  /* Its header is two rows and no more: title, count and close (44), then the search across the width (40).
+     The zoom pair goes (a pinch does it) and lab income moves to the foot of the detail sheet. */
+  body.phone .tth { gap: 0 var(--s2); padding: 0 var(--s1) var(--s2) var(--s3); min-height: 0; }
+  body.phone .tth h2 { line-height: 44px; }
+  body.phone .tth #tt-count { flex: 1; }
+  body.phone .tth .tt-sold, body.phone .ttz { display: none; }
+  body.phone .tth .close { width: 44px; height: 44px; margin-left: auto; }
+  body.phone .tth #tt-q { margin-right: var(--s2); }
+  body.phone .ttd .tt-sold-foot { display: flex; }
+  body.phone .ttd { padding: var(--s2) var(--s3); }
+  body.phone .start { gap: var(--s3); }
+  body.phone .start h1 { font-size: calc(24 * var(--px)); line-height: calc(28 * var(--px)); }
+  body.phone .start .card { min-height: 0; }
+  /* A deposit selection's facing on a phone's card: the arrow alone, as the tool strip shows it. */
+  body.phone #command .cact .facing .fw { display: none; }
+
+  /* ---- LK glyphs & research */
+  /* The drawn set (glyphs.ts): 24-box line glyphs in the colour of the text around them. The size is a class,
+     N × --px, so a glyph follows the UI scale like the type beside it: 20 in a control, 16 inline, 12 only
+     as a corner mark on a research node, 24 in a toolbar slot. */
+  .g { flex: none; display: inline-block; vertical-align: middle; overflow: visible; }
+  .g12 { width: calc(12 * var(--px)); height: calc(12 * var(--px)); }
+  .g16 { width: calc(16 * var(--px)); height: calc(16 * var(--px)); }
+  .g20 { width: calc(20 * var(--px)); height: calc(20 * var(--px)); }
+  .g24 { width: calc(24 * var(--px)); height: calc(24 * var(--px)); }
+  /* Status shapes: disc working, triangle starved or blocked, square danger, ring idle. */
+  .ss { flex: none; display: inline-block; width: calc(10 * var(--px)); height: calc(10 * var(--px)); vertical-align: calc(-1 * var(--px)); }
+  .ss.ok { color: var(--ok); }
+  .ss.warn { color: var(--warn); }
+  .ss.danger { color: var(--danger); }
+  .ss.idle { color: var(--muted); }
+  /* The coin is gold: the money token for the face, the same gold taken towards its dark on-cream shade for the rim and
+     the embossed ring, and towards cream for the edge the south-west sun catches. */
+  .coin { flex: none; display: inline-block; vertical-align: middle; }
+  .coin12 { width: calc(12 * var(--px)); height: calc(12 * var(--px)); }
+  .coin16 { width: calc(16 * var(--px)); height: calc(16 * var(--px)); }
+  .coin20 { width: calc(20 * var(--px)); height: calc(20 * var(--px)); }
+  .coin .rim { fill: color-mix(in srgb, var(--money) 35%, var(--money-on-light)); }
+  .coin .face { fill: var(--money); }
+  .coin .boss { fill: color-mix(in srgb, var(--money) 45%, var(--money-on-light)); }
+  .coin .ring { fill: none; stroke: color-mix(in srgb, var(--money) 45%, var(--money-on-light)); }
+  .coin .lit { fill: none; stroke: color-mix(in srgb, var(--money) 40%, var(--sel)); stroke-linecap: round; }
+
+  /* ---- where the glyphs sit. */
+  /* Static markup names a glyph and ui.ts draws it there; the holder must not add a text line's height. */
+  [data-glyph] { display: inline-flex; vertical-align: middle; }
+  /* A slot's price line: the coin and the number, or the lock and the research tier, on one centre line. */
+  #toolbar .tool .c { display: inline-flex; align-items: center; justify-content: center; gap: calc(2 * var(--px)); }
+  /* H greys a locked price with a filter, which was for the emoji; the lock glyph is already the right grey. */
+  #toolbar .tool.locked .c { filter: none; }
+  #toolbar .tool.locked .glyph, #toolbar .tool.locked img.ic { background: none; }
+  /* The top bar: the coin on the number's centre line; the flask takes the ring's state colours from H. */
+  #topbar .stat .coin { margin-right: calc(2 * var(--px)); }
+  #topbar .stat.speed .v { display: inline-flex; align-items: center; }
+  /* The tier is text ("T2"), first on the sub-line and of fixed width, so the lamp's word never moves it. */
+  #command .cs .tier { display: inline-block; font-weight: 700; color: var(--muted); margin-right: var(--s2); }
+  #command .cstate .warn { color: var(--warn); }
+  #command .cstate .red { color: var(--danger-text); }
+  #command .cstate .ss { margin-right: calc(2 * var(--px)); }
+  /* A warning line is its triangle and its words on one line. */
+  .warn .g { vertical-align: calc(-3 * var(--px)); }
+  .lock .g { vertical-align: calc(-1 * var(--px)); }
+  #tooltip .coin, .eprice .coin, .item .coin { vertical-align: calc(-2 * var(--px)); }
+  .item .gold { font-weight: 700; }
+  /* The count on "demolish all" is a count, not a price: it takes the button's colour. */
+  #command .cact .count { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; }
+  #command .cact button:has(.count) { gap: calc(2 * var(--px)); }
+  /* A card action with a glyph and a price keeps them 4 apart, like a slot. */
+  #command .cact button .g + .g { margin-left: calc(-2 * var(--px)); }
+  /* The toast's glyph fills its 20px box; H's colours per kind apply through currentColor. */
+  .toast .ti { display: flex; height: var(--lh-body); align-items: center; justify-content: center; }
+  /* Menu rows: a 16px glyph in a fixed 20px box, so every label starts on one line (02 §9 #5). */
+  .dialog .menu button > .g { width: calc(16 * var(--px)); margin: 0 calc(2 * var(--px)); }
+  .dialog .speedrow button .g { margin: 0; }
+  #side .ev .ei { display: flex; align-self: center; color: var(--muted); }
+  #side .ev.error .ei { color: var(--danger-text); }
+  #side .erow .chev { display: flex; align-items: center; justify-content: center; }
+  #side .kv .l .g, #side .kv .l .coin, #side .kv .l img.ic { margin-right: var(--s1); vertical-align: calc(-3 * var(--px)); }
+  .dialog .srow .name .g { margin-right: var(--s1); vertical-align: calc(-3 * var(--px)); color: var(--muted); }
+  .dialog .help .keys .g { vertical-align: calc(-4 * var(--px)); }
+  body.touch #undo button .g { width: 20px; height: 20px; }
+  body.phone #recipes .facing .fa, #command .cact .facing .fa, body.touch #recipes .facing .fa { line-height: 0; }
+  /* The stop at the end of a row that scrolls (02 §9 #12) is a real button now (ui.ts syncRowStop), so H's
+     drawn stop and chevron, which could not be pressed, are switched off. */
+  #recipes.scrolls::after, #command .crow.scrolls::after, #command .cmid.scrolls::after, #recipes.scrolls::before, #command .crow.scrolls::before, #command .cmid.scrolls::before { content: none; }
+  /* A paged row (ui.ts syncRowStop): it rests only on a chip's start, so nothing is ever cut mid-word on the
+     left; `›` sits on an opaque stop at the right end, `‹` on an opaque plate that appears over the left
+     end once the row has moved. The plate takes no room in the row (zero width, the button hangs off it),
+     so its coming and going moves no chip. `.pad` is the spacer that lets the last page rest on a chip too. */
+  #recipes, #command .crow { scroll-snap-type: x mandatory; }
+  #recipes > :not(.rl):not(.stop):not(.back):not(.pad), #command .crow > :not(.stop):not(.back):not(.pad) { scroll-snap-align: start; }
+  .stop { position: sticky; right: 0; order: 99; flex: none; align-self: stretch; display: flex; align-items: center; margin-left: auto; padding: 0 0 0 var(--s2); background: var(--panel); border-left: 1px solid var(--divider); z-index: 2; }
+  #recipes .stop { padding-right: var(--s1); }
+  .stop button, .back button { width: calc(28 * var(--px)); height: calc(28 * var(--px)); min-height: 0; min-width: 0; padding: 0; color: var(--muted); }
+  .stop.end button .g { transform: rotate(180deg); }
+  .pad { order: 98; flex: none; width: 0; align-self: stretch; }
+  .back { position: sticky; left: 0; order: -1; flex: none; width: 0; align-self: stretch; margin-right: calc(-1 * var(--s1)); z-index: 2; visibility: hidden; }
+  .back.on { visibility: visible; }
+  .back::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: calc(36 * var(--px)); background: var(--panel); border-right: 1px solid var(--divider); }
+  .back button { position: absolute; left: 0; top: 50%; margin-top: calc(-14 * var(--px)); }
+  #recipes .rl { order: -2; }
+  body.phone #command .cmid > .back { margin-right: calc(-1 * var(--s2)); }
+  /* The strip has 8px of padding the plate must cover too, or a digit shows to its left. */
+  body.phone #command .cmid > .back::before { left: calc(-1 * var(--s2)); width: calc(48px + var(--s2)); }
+  :is(body.touch, body.phone) .stop button, :is(body.touch, body.phone) .back button { width: 40px; height: 40px; }
+  :is(body.touch, body.phone) .back button { margin-top: -20px; }
+  :is(body.touch, body.phone) .back::before { width: 48px; }
+
+  /* ---- research tree (interview 02 §8, flat per DESIGN §3). The job of the tree is "what can I research
+     now?": researched is quiet, what is in reach is the only cream-edged thing on the canvas, what is filling
+     is teal, what is locked is recessed. Every state keeps the same boxes in the same places (techtree.ts),
+     so a completion changes colours and nothing else. These rules come after track H's and replace its
+     interim node and connector rules: geometry moved from rem to whole HUD pixels, and the states gained
+     "in progress". */
+  .ttt { left: 0; width: calc(56 * var(--px)); height: calc(92 * var(--px)); padding: 0; display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; }
+  .ttn { width: calc(176 * var(--px)); height: calc(92 * var(--px)); display: block; padding: 0; gap: 0; overflow: hidden; background: var(--raised); border: 1px solid var(--edge); box-shadow: var(--tt-in, 0 0 0 0 transparent), var(--tt-ring, 0 0 0 0 transparent), var(--tt-ring2, 0 0 0 0 transparent); }
+  /* A node is a place on a map: a press must not slide it off its connectors. */
+  .ttn:active:not(:disabled) { transform: none; }
+  .ttn .nm { position: absolute; left: calc(8 * var(--px)); right: calc(24 * var(--px)); top: calc(7 * var(--px)); font-size: var(--fs-body); line-height: calc(18 * var(--px)); font-weight: 600; color: var(--text); }
+  /* The corner mark: a tick on what is researched, a lock on what is not in reach. Both are always in the
+     markup, so a state change swaps which one shows and moves nothing. */
+  .ttn .mk { position: absolute; top: calc(7 * var(--px)); right: calc(7 * var(--px)); width: calc(16 * var(--px)); height: calc(16 * var(--px)); display: none; align-items: center; justify-content: center; }
+  .ttn .mk-done { color: var(--ok); }
+  .ttn .mk-done .g { width: calc(14 * var(--px)); height: calc(14 * var(--px)); }
+  .ttn .mk-lock { color: var(--disabled); }
+  .ttn.done .mk-done, .ttn.locked .mk-lock { display: flex; }
+  /* What it costs against what the lab has banked. */
+  .ttn .co { position: absolute; left: calc(7 * var(--px)); right: calc(7 * var(--px)); top: calc(47 * var(--px)); height: calc(16 * var(--px)); display: flex; align-items: center; gap: var(--s2); font-size: var(--fs-sm); line-height: var(--lh-sm); white-space: nowrap; overflow: hidden; }
+  .ttn .co .ci { display: inline-flex; align-items: center; gap: calc(2 * var(--px)); }
+  .ttn .co b { font-weight: 700; color: var(--text); }
+  .ttn .co b.full { color: var(--ok); }
+  .ttn.done .co { visibility: hidden; }
+  .ttn .un { position: absolute; left: calc(7 * var(--px)); right: calc(7 * var(--px)); bottom: calc(7 * var(--px)); height: calc(20 * var(--px)); margin: 0; display: flex; align-items: center; gap: var(--s1); overflow: hidden; }
+  .ttn .un img.ic { width: calc(20 * var(--px)); height: calc(20 * var(--px)); }
+  /* The tier tag hangs off the icon's corner and takes no room in the row, so it cannot shift it. */
+  .ttn .un .tu { position: relative; display: inline-flex; align-items: center; }
+  .ttn .un .tu i { position: static; margin: 0 0 0 calc(2 * var(--px)); align-self: center; font-style: normal; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; color: var(--muted); }
+  .ttn .un .tu.wide { gap: var(--s1); font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); }
+  .ttn .un .tu.wide b { font-weight: 700; }
+  .ttn .un .pc { margin-left: auto; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 700; color: var(--research); }
+  /* The bar is the node's bottom edge, inside its radius, and only a node that is filling has one. */
+  .ttn .bar { position: absolute; left: 0; right: 0; bottom: 0; height: var(--s1); margin: 0; border-radius: 0; background: var(--well); display: none; }
+  .ttn .bar > div { background: var(--research); }
+  .ttn.progress .bar { display: block; }
+  /* Researched: quiet. No bar, the name stepped back, the tick in the corner. */
+  .ttn.done, .ttn.done:hover { background: var(--pressed); border-color: var(--divider); }
+  .ttn.done .nm { color: var(--muted); }
+  /* In reach: the brightest thing here. The second pixel of edge is an inset shadow, so the box inside
+     is the same size in every state. */
+  .ttn.available { border-color: var(--sel); --tt-in: inset 0 0 0 1px var(--sel); }
+  .ttn.progress { border-color: var(--research); --tt-in: inset 0 0 0 1px var(--research); }
+  /* Locked: recessed, but it still shows what it would give — as silhouettes. That is the hook. */
+  .ttn.locked, .ttn.locked:hover { background: var(--well); border-color: var(--divider); }
+  .ttn.locked .nm { color: var(--disabled); }
+  .ttn.locked .co b, .ttn.locked .co b.full { color: var(--disabled); }
+  .ttn.locked .un .tu i, .ttn.locked .un .tu.wide { color: var(--disabled); }
+  .ttn.locked .un img.ic { opacity: 1; filter: brightness(0) invert(0.34); }
+  .ttn.locked .co img.ic { opacity: 0.55; filter: grayscale(1); }
+  /* Selected, in any state: a ring outside the edge with a gap of the canvas between them, so the state and
+     the selection never fight over one border. Keyboard focus has the same geometry (the global ring). */
+  .ttn.on { --tt-ring: 0 0 0 2px var(--well); --tt-ring2: 0 0 0 4px var(--sel); box-shadow: var(--tt-in, 0 0 0 0 transparent), var(--tt-ring), var(--tt-ring2); }
+  /* A selection reads as one line of descent; the rest steps back. What steps back is a node's content, not
+     its box: state stays on the border and the ground, the corner mark stays at full strength (so "locked"
+     differs from "researched, stepped back" by a shape, not by a grey), and every title still holds 3:1. */
+  .tt.sel .ttn { opacity: 1; }
+  .tt.sel .ttn:not(.on):not(.anc):not(.desc) > :not(.mk) { opacity: 0.55; }
+  .tt.sel .ttn.locked:not(.on):not(.anc):not(.desc) > :not(.mk) { opacity: 0.75; }
+  /* The tree always opens with something selected, and "what can I research now" must survive that: what is
+     in reach steps back less than the rest. */
+  .tt.sel .ttn.available:not(.on):not(.anc):not(.desc) > :not(.mk), .tt.sel .ttn.progress:not(.on):not(.anc):not(.desc) > :not(.mk) { opacity: 0.8; }
+  .tt.filtered .ttn:not(.miss) > * { opacity: 1 !important; }
+  /* Connectors: 2px, at right angles, a bus per parent (techtree.ts), and quiet: about 3:1 on the canvas,
+     a step less between two finished technologies. Node titles out-rank them. The selected node's line of
+     descent is 3px of cream, drawn last. A technology that is filling colours its own drop off the bus, not
+     the bus: that is shared with its siblings. */
+  .ttlines path { stroke: color-mix(in srgb, var(--edge) 75%, var(--edge-strong)); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .ttlines path.dd { stroke: var(--edge); }
+  .ttlines path.drop { stroke: none; }
+  .ttlines path.drop.pr { stroke: var(--research); }
+  .tt.sel .ttlines path.on, .ttlines path.on { stroke: var(--sel); stroke-width: 3; }
+  .ttlines circle { fill: color-mix(in srgb, var(--edge) 75%, var(--edge-strong)); stroke: none; }
+  .ttlines circle.done { fill: var(--edge); }
+  .ttlines circle.available { fill: var(--sel); }
+  .ttlines circle.progress { fill: var(--research); }
+  .tt.sel .ttlines circle.on { fill: var(--sel); }
+  /* Header: the coin sits on the number's line; the detail column's state line carries its shape. */
+  .tth .tt-sold { display: inline-flex; align-items: center; gap: var(--s1); }
+  .tth .tt-sold b { font-weight: 700; }
+  .ttd .ds { display: flex; align-items: center; gap: var(--s1); }
+  .ttd .ds.progress { color: var(--research); }
+  .ttd .bar > div { background: var(--research); }
+  .ttl { gap: var(--s1); }
+  .ttl.progress { color: var(--research); }
+</style>
+</head>
+<body>
+<canvas id="ground"></canvas>
+<canvas id="game"></canvas>
+<div id="loading" role="status" aria-live="polite">
+  <div class="name">Buildermont</div>
+  <div class="step" id="loading-step">Reading the map</div>
+  <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="loading-step"><i id="loading-bar"></i></div>
+</div>
+<div id="connect">Connecting to server…</div>
+
+<!-- RV-030: four things and nothing else — the menu, what you have, what research is doing, and the
+     one panel menu. Speed and pause moved into ☰ (they are settings, not a readout); time and belt
+     speed into the Stats panel; the save pill became the 6px dot inside the gold group. The token
+     group is created by ui.ts only while the player has one, and removed again — never hidden. -->
+<header id="topbar" class="panel" aria-label="Status bar">
+  <button id="btn-menu" title="Menu (Esc)" aria-label="Menu" aria-haspopup="dialog"><span data-glyph="menu"></span></button>
+  <div class="stat gold" data-tip="<b>Gold</b><div class='hint'>Earned by selling items in a Gold Vault. Income is measured over the last minute of game time.</div>"><span class="bal"><span aria-hidden="true" data-glyph="coin"></span><span class="v" id="gold">0</span></span><span class="sub" id="income">+0/min</span><span id="saved-dot" title="Saved" aria-hidden="true"></span></div>
+  <span id="topbar-spacer"></span>
+  <button id="research-bar" aria-label="Research" title="Research (T)"><span class="ri" aria-hidden="true" data-glyph="research"></span><span class="rp" aria-hidden="true"><i id="research-fill"></i></span></button>
+  <button id="btn-more" title="Panels" aria-label="Panels menu" aria-haspopup="dialog"><span data-glyph="more"></span></button>
+</header>
+<!-- The paused state is the map going quiet, not a lit button (RV-030 / DESIGN K4). -->
+<div id="paused" hidden><span>paused</span></div>
+
+<aside id="objectives" class="panel" aria-label="Objectives" hidden></aside>
+<aside id="side" class="panel" aria-live="polite" hidden></aside>
+
+<div id="bottom">
+  <div id="command" class="panel" role="region" aria-label="Selection" hidden></div>
+  <div id="recipes" class="panel" role="toolbar" aria-label="Recipe" hidden></div>
+  <nav id="toolbar" class="panel" aria-label="Build tools"></nav>
+</div>
+<div id="status" aria-live="polite"></div>
+<!-- Touch devices only (docs/MOBILE.md §4.6): Ctrl+Z / Ctrl+Shift+Z as a fixed pill above the bottom bar.
+     Always present while it applies; the buttons only ever change their disabled state. -->
+<div id="undo" class="panel" role="group" aria-label="Undo and redo">
+  <button id="btn-undo" title="Undo" aria-label="Undo" disabled><span data-glyph="undo"></span></button>
+  <button id="btn-redo" title="Redo" aria-label="Redo" disabled><span data-glyph="redo"></span></button>
+</div>
+<div id="tooltip" class="panel" role="tooltip"></div>
+<div id="toasts" aria-live="polite"></div>
+
+<div id="overlay" hidden><div id="dialog" class="dialog" role="dialog" aria-modal="true" tabindex="-1"></div></div>
+
+<!-- Help content; rendered inside a modal by screens.ts (toggleHelp / H / menu). One <section> per
+     topic so screens.ts can put Touch first on a touch device and drop Bots in the offline build. -->
+<div id="help" hidden>
+  <section class="hs" data-sec="goal">
+  <h3>Goal</h3>
+  <p>Extract raw resources, move them on conveyor belts into factories, sell products in a Gold Vault, research the tech tree and finally build an Earth Teleporter. Producing the first Earth Token wins; the factory keeps running afterwards.</p>
+  </section>
+  <section class="hs" data-sec="rules">
+  <h3>Rules</h3>
+  <ul>
+    <li>A belt <b>pointing into</b> a building feeds it. Any belt <b>beside</b> a building that does not point into it carries the building's output.</li>
+    <li>Extractors only work on deposits and never run out. Factories need a recipe (choose it in the recipe strip when placing, or in the inspector).</li>
+    <li>The Research Lab takes the items the selected technology needs, and banks anything a later technology will need — progress is kept per technology. The Gold Vault sells everything delivered to it.</li>
+    <li>Belt Splitters hand items round-robin to every neighbour; Underground Belts pair automatically with an exit in range; Robotic Arms move one item at a time from behind to in front (optionally filtered).</li>
+    <li>Power plants boost nearby production buildings while they have fuel. Demolishing refunds everything spent.</li>
+  </ul>
+  </section>
+  <section class="hs" data-sec="mouse">
+  <h3>Mouse</h3>
+  <div class="keys">
+    <span><kbd>LMB</kbd></span><span>place, select, drag belts / paint 1×1 buildings / select an area. A belt drag that ends <b>on</b> a belt or building feeds into it and leaves it as it is; drag on past a belt to re-route it</span>
+    <span><kbd>Shift</kbd>+<kbd>LMB</kbd></span><span>add to selection · straight belt while dragging</span>
+    <span><kbd>RMB</kbd> / <kbd>MMB</kbd></span><span>pan (a right click without dragging cancels the build tool)</span>
+    <span><kbd>Wheel</kbd></span><span>zoom towards the cursor · click or drag the minimap to jump</span>
+  </div>
+  </section>
+  <section class="hs" data-sec="keyboard">
+  <h3>Keyboard</h3>
+  <div class="keys">
+    <span><kbd>1</kbd>–<kbd>9</kbd></span><span>build tools in toolbar order</span>
+    <span><kbd>Q</kbd> / <kbd>E</kbd></span><span>rotate counter-clockwise / clockwise (<kbd>Shift</kbd>+<kbd>R</kbd> / <kbd>R</kbd> do the same): the build tool, the paste ghost, a lifted selection, the facing of selected deposits, or the hovered / selected building &mdash; belts, arms, undergrounds and every production building have a facing. A selected building also shows the two rotate buttons off its top-right corner</span>
+    <span><kbd>Enter</kbd> / <kbd>B</kbd></span><span>with deposits selected: build extractors, all facing the way the card shows &mdash; on the clicked tile, or on every free tile of a dragged box in one undo step. <kbd>Enter</kbd> also puts a lifted selection down</span>
+    <span><kbd>Ctrl/&#8984;</kbd>+<kbd>Enter</kbd></span><span>with a deposit tile selected: build on every free tile of its whole patch at once, the same as the card's patch button</span>
+    <span><kbd>N</kbd></span><span>extend the selected belt one tile the way it faces (the same as clicking the handle in front of it); the selection follows the new end, so holding <kbd>N</kbd> walks a belt out. The belt's card has the same button</span>
+    <span><kbd>P</kbd></span><span>pipette: copy type, rotation and recipe from the hovered building</span>
+    <span><kbd>X</kbd></span><span>demolish mode</span>
+    <span><kbd>Delete</kbd></span><span>remove the selection</span>
+    <span><kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> / <kbd>Shift</kbd>+<kbd>Z</kbd></span><span>undo / redo</span>
+    <span><kbd>C</kbd> · <kbd>Ctrl/⌘</kbd>+<kbd>C</kbd> / <kbd>V</kbd></span><span>copy the selection as a blueprint / paste it. <kbd>K</kbd> opens the blueprint library: save the selection under a name, paste a saved one, and share one as a text string a friend can import</span>
+    <span><kbd>Esc</kbd></span><span>cancel tool → deselect → close panel → menu</span>
+    <span><kbd>Space</kbd> · <kbd>+</kbd> / <kbd>-</kbd></span><span>pause · change speed (also in the menu)</span>
+    <span><kbd>WASD</kbd> / arrows · <kbd>Home</kbd></span><span>pan · recentre the camera</span>
+    <span><kbd>T</kbd> <kbd>I</kbd> <kbd>K</kbd> <kbd>L</kbd> <kbd>H</kbd></span><span>research · encyclopedia · blueprint library · event log · this help</span>
+    <span><kbd>F</kbd></span><span>jump to the next stalled building</span>
+  </div>
+  </section>
+  <section class="hs" data-sec="touch">
+  <h3>Touch</h3>
+  <div class="keys">
+    <span>One finger</span><span>tap a building, a deposit or a belt handle to select it · drag to pan · hold still for a moment, then drag, to select an area</span>
+    <span>Two fingers</span><span>pan and pinch to zoom, with any tool in hand</span>
+    <span>Build tool</span><span>tap to place. The Conveyor Belt lays a belt along a one-finger drag (end it on a belt or building to feed it); Demolish clears a dragged area; Paste stamps where you tap</span>
+    <span><span data-glyph="ccw"></span> <span data-glyph="cw"></span></span><span>in the strip above the tools: turn the tool in hand · a selected building has the same pair on its card and off its top-right corner · selected deposits have it on their card, for the way new extractors face</span>
+    <span><span data-glyph="undo" data-size="16"></span> <span data-glyph="redo" data-size="16"></span></span><span>bottom-left: undo and redo</span>
+    <span><span data-glyph="menu" data-size="16"></span></span><span>menu: pause and game speed, saving, settings and quitting</span>
+    <span><span data-glyph="more" data-size="16"></span></span><span>research, statistics, encyclopedia, blueprints, event log, next stalled building and this help</span>
+    <span>Minimap</span><span>tap to jump there</span>
+  </div>
+  </section>
+  <section class="hs" data-sec="bots">
+  <h3>Bots</h3>
+  <p>Everything above is available over HTTP and WebSocket: <a href="/docs/API.md" target="_blank" rel="noopener">/docs/API.md</a>.</p>
+  </section>
+</div>
+
+<script>window.BM_LOCAL = true; window.BM_BUILD = "126d28ea8d16";</script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -603,8 +603,8 @@
   .ttn.locked .nm { color: var(--disabled); }
   .ttn.locked img.ic { opacity: 0.6; }
   .ttn.on { box-shadow: 0 0 0 2px var(--well), 0 0 0 4px var(--sel); }
-  /* A selection reads as one line of descent: the node, what it needs, what it opens. The rest is
-     pushed back rather than hidden — BH-054: status is carried by border, ground and the marker,
+  /* A selection reads as one line: the node and what it needs above it. The rest is pushed
+     back rather than hidden — BH-054: status is carried by border, ground and the marker,
      never by dimming alone, so what a node says stays readable whatever is selected. */
   /* A search wins over the selection's dimming: what was looked for is what must stand out. */
   .tt.filtered .ttn.miss { opacity: 0.1; }
@@ -1015,20 +1015,21 @@
   /* Selected, in any state: a ring outside the edge with a gap of the canvas between them, so the state and
      the selection never fight over one border. Keyboard focus has the same geometry (the global ring). */
   .ttn.on { --tt-ring: 0 0 0 2px var(--well); --tt-ring2: 0 0 0 4px var(--sel); box-shadow: var(--tt-in, 0 0 0 0 transparent), var(--tt-ring), var(--tt-ring2); }
-  /* A selection reads as one line of descent; the rest steps back. What steps back is a node's content, not
-     its box: state stays on the border and the ground, the corner mark stays at full strength (so "locked"
-     differs from "researched, stepped back" by a shape, not by a grey), and every title still holds 3:1. */
+  /* A selection reads as one line — the node and what it needs above it — and the rest steps back.
+     What steps back is a node's content, not its box: state stays on the border and the ground, the
+     corner mark stays at full strength (so "locked" differs from "researched, stepped back" by a
+     shape, not by a grey), and every title still holds 3:1. */
   .tt.sel .ttn { opacity: 1; }
-  .tt.sel .ttn:not(.on):not(.anc):not(.desc) > :not(.mk) { opacity: 0.55; }
-  .tt.sel .ttn.locked:not(.on):not(.anc):not(.desc) > :not(.mk) { opacity: 0.75; }
+  .tt.sel .ttn:not(.on):not(.anc) > :not(.mk) { opacity: 0.55; }
+  .tt.sel .ttn.locked:not(.on):not(.anc) > :not(.mk) { opacity: 0.75; }
   /* The tree always opens with something selected, and "what can I research now" must survive that: what is
      in reach steps back less than the rest. */
-  .tt.sel .ttn.available:not(.on):not(.anc):not(.desc) > :not(.mk), .tt.sel .ttn.progress:not(.on):not(.anc):not(.desc) > :not(.mk) { opacity: 0.8; }
+  .tt.sel .ttn.available:not(.on):not(.anc) > :not(.mk), .tt.sel .ttn.progress:not(.on):not(.anc) > :not(.mk) { opacity: 0.8; }
   .tt.filtered .ttn:not(.miss) > * { opacity: 1 !important; }
   /* Connectors: 2px, at right angles, a bus per parent (techtree.ts), and quiet: about 3:1 on the canvas,
-     a step less between two finished technologies. Node titles out-rank them. The selected node's line of
-     descent is 3px of cream, drawn last. A technology that is filling colours its own drop off the bus, not
-     the bus: that is shared with its siblings. */
+     a step less between two finished technologies. Node titles out-rank them. The line above the
+     selected node — what it needs — is 3px of cream, drawn last. A technology that is filling
+     colours its own drop off the bus, not the bus: that is shared with its siblings. */
   .ttlines path { stroke: color-mix(in srgb, var(--edge) 75%, var(--edge-strong)); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .ttlines path.dd { stroke: var(--edge); }
   .ttlines path.drop { stroke: none; }
@@ -1158,7 +1159,7 @@
   </section>
 </div>
 
-<script>window.BM_LOCAL = true; window.BM_BUILD = "126d28ea8d16";</script>
+<script>window.BM_LOCAL = true; window.BM_BUILD = "3669640b09dc";</script>
 <script src="app.js"></script>
 </body>
 </html>

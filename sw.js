@@ -5,7 +5,7 @@
 // The worker only ever touches the app shell and the art: play.html, the two bundles, the manifest, the icons and the
 // atlas pages. Saves (`saves/…`), the bot API and source maps go straight to the network and are never cached, so the
 // offline app can still talk to the install server when it is reachable (M10).
-const VERSION = '3669640b09dc';
+const VERSION = '2dfb761f99bc';
 const CACHE = `buildermont-${VERSION}`;
 /**
  * The atlas pages have a cache of their own that outlives a build. A page's name carries a hash of its bytes, so a page
